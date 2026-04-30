@@ -1,0 +1,10 @@
+{
+	"id": "obsidian-life-tracker",
+	"name": "Life Tracker",
+	"description": "Unified habit, maintenance, reverse-habit, project, and counter tracker built on a single event-stream model.",
+	"author": "Matt Stewart",
+	"authorUrl": "",
+	"version": "0.1.0",
+	"minAppVersion": "0.15.0",
+	"isDesktopOnly": false
+}
