@@ -9,7 +9,7 @@ tags:
   - phone
 created: 2026-02-01
 schemaVersion: 1
-noteRequired: true
+noteRequired: false
 milestones:
   - 7
   - 14
