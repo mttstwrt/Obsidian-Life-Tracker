@@ -407,6 +407,10 @@ Analytics view
 
 Done when: every kind has at least one meaningful visualization, custom numeric fields surface in detail views, and Analytics handles edge cases (zero events, single-event definitions, fields with mixed types in old data).
 
+Phase 5.5 - Custom dashboards
+
+ Arrange and display the data you want however you want it. A default dashboard exists with the current views.
+
 Phase 6 — External data adapters (optional for v1)
 
  Adapter interface: (dateRange) => Promise<Event[]> plus a target definitionId. Adapters can populate custom fields.
