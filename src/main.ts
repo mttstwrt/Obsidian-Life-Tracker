@@ -7,19 +7,24 @@ import { DefinitionFormModal } from "./views/DefinitionFormModal";
 import { EventDetailModal } from "./views/EventDetailModal";
 import { LogEventModal } from "./views/LogEventModal";
 import { PickDefinitionModal } from "./views/PickDefinitionModal";
+import { ReorderModal, type ReorderItem } from "./views/ReorderModal";
 import { LifeTrackerSettingTab } from "./views/SettingsTab";
 import "virtual:uno.css";
+
+export type OrderTabKey = "habits" | "counters" | "maintenance" | "projects";
 
 interface LifeTrackerSettings {
 	rootFolder: string;
 	recentDefinitionIds: string[];
 	quickLogIds: string[];
+	definitionOrder: Record<OrderTabKey, string[]>;
 }
 
 const DEFAULT_SETTINGS: LifeTrackerSettings = {
 	rootFolder: "LifeTracker",
 	recentDefinitionIds: [],
 	quickLogIds: [],
+	definitionOrder: { habits: [], counters: [], maintenance: [], projects: [] },
 };
 
 const RECENT_LIMIT = 20;
@@ -30,10 +35,70 @@ export default class LifeTrackerPlugin extends Plugin {
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.settings.definitionOrder = {
+			...DEFAULT_SETTINGS.definitionOrder,
+			...(this.settings.definitionOrder ?? {}),
+		};
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+	}
+
+	async setDefinitionOrder(tab: OrderTabKey, ids: string[]): Promise<void> {
+		this.settings.definitionOrder[tab] = ids;
+		await this.saveSettings();
+		this.refreshDashboards();
+	}
+
+	private refreshDashboards(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_DASHBOARD)) {
+			const view = leaf.view as DashboardView;
+			view.refresh?.();
+		}
+	}
+
+	async openReorderModal(tab: OrderTabKey): Promise<void> {
+		const { definitions } = await this.data.loadDefinitions();
+		const tabKinds: Record<OrderTabKey, Definition["kind"][]> = {
+			habits: ["habit", "reverse-habit"],
+			counters: ["counter"],
+			maintenance: ["maintenance"],
+			projects: ["project"],
+		};
+		const allowed = new Set(tabKinds[tab]);
+		const tabDefs = definitions.filter(
+			(d) => d.status === "active" && allowed.has(d.kind),
+		);
+		const order = this.settings.definitionOrder[tab] ?? [];
+		const idx = new Map(order.map((id, i) => [id, i]));
+		tabDefs.sort((a, b) => {
+			const ai = idx.get(a.id);
+			const bi = idx.get(b.id);
+			if (ai !== undefined && bi !== undefined) return ai - bi;
+			if (ai !== undefined) return -1;
+			if (bi !== undefined) return 1;
+			return a.displayName.localeCompare(b.displayName);
+		});
+		const items: ReorderItem[] = tabDefs.map((d) => ({
+			id: d.id,
+			label: d.displayName,
+			emoji: d.emoji,
+			hint: d.kind === "reverse-habit" ? "reverse" : undefined,
+		}));
+		const titles: Record<OrderTabKey, string> = {
+			habits: "Reorder habits",
+			counters: "Reorder counters",
+			maintenance: "Reorder maintenance",
+			projects: "Reorder projects",
+		};
+		new ReorderModal(this.app, {
+			title: titles[tab],
+			items,
+			onSave: async (ids) => {
+				await this.setDefinitionOrder(tab, ids);
+			},
+		}).open();
 	}
 
 	rebuildDataLayer(): void {
