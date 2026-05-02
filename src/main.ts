@@ -1,6 +1,7 @@
 import { Plugin } from "obsidian";
 import { DataLayer } from "./data/dataLayer";
 import { ObsidianVaultAdapter } from "./data/vaultAdapter";
+import { DefinitionFormModal } from "./views/DefinitionFormModal";
 import { ExampleView, VIEW_TYPE_EXAMPLE } from "./views/ExampleView";
 import { LogEventModal } from "./views/LogEventModal";
 import { PickDefinitionModal } from "./views/PickDefinitionModal";
@@ -56,6 +57,12 @@ export default class LifeTrackerPlugin extends Plugin {
 			callback: () => this.openPicker(),
 		});
 
+		this.addCommand({
+			id: "new-definition",
+			name: "New definition",
+			callback: () => this.openNewDefinition(),
+		});
+
 		await this.registerQuickLogCommands();
 
 		this.addSettingTab(new LifeTrackerSettingTab(this.app, this));
@@ -101,6 +108,27 @@ export default class LifeTrackerPlugin extends Plugin {
 		new LogEventModal(this.app, this.data, def, (id) =>
 			this.recordRecent(id),
 		).open();
+	}
+
+	async openNewDefinition(): Promise<void> {
+		const { definitions } = await this.data.loadDefinitions();
+		const existingIds = new Set(definitions.map((d) => d.id));
+		new DefinitionFormModal(this.app, this.data, {
+			mode: "create",
+			existingIds,
+		}).open();
+	}
+
+	async openEditDefinition(definitionId: string): Promise<void> {
+		const { definitions } = await this.data.loadDefinitions();
+		const existing = definitions.find((d) => d.id === definitionId);
+		if (!existing) return;
+		const existingIds = new Set(definitions.map((d) => d.id));
+		new DefinitionFormModal(this.app, this.data, {
+			mode: "edit",
+			existing,
+			existingIds,
+		}).open();
 	}
 
 	private async recordRecent(id: string): Promise<void> {
