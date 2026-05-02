@@ -47,3 +47,4 @@ Project. No cadence target; just track what gets done. The 'tags' field is retir
 - 2026-04-27T19:00 | 30 | spent on tooling, irritated | id="01HW0PL00000000000000003" minutes="30" area="docs" commits="0" blocked="true"
 - 2026-04-20T14:00 | 60 | initial spike before today's restart | id="01HW0PL00000000000000004" minutes="60" area="ui" commits="2" blocked="false" tags="setup,scaffolding"
 - 2026-04-15T21:30 | 20 | scaffolded repo from template | id="01HW0PL00000000000000005" minutes="20" area="bootstrap" commits="1" blocked="false" tags="bootstrap"
+- 2026-05-01T22:31 |  |  | id="01KQKBVMHXSJZKED1G83FWT4E2" area="" blocked=""

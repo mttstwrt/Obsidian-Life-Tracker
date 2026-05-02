@@ -1,8 +1,10 @@
-import { Plugin } from "obsidian";
+import { Notice, Plugin, type WorkspaceLeaf } from "obsidian";
 import { DataLayer } from "./data/dataLayer";
 import { ObsidianVaultAdapter } from "./data/vaultAdapter";
+import type { Definition, Event } from "./data/types";
+import { DashboardView, VIEW_TYPE_DASHBOARD } from "./views/DashboardView";
 import { DefinitionFormModal } from "./views/DefinitionFormModal";
-import { ExampleView, VIEW_TYPE_EXAMPLE } from "./views/ExampleView";
+import { EventDetailModal } from "./views/EventDetailModal";
 import { LogEventModal } from "./views/LogEventModal";
 import { PickDefinitionModal } from "./views/PickDefinitionModal";
 import { LifeTrackerSettingTab } from "./views/SettingsTab";
@@ -45,10 +47,19 @@ export default class LifeTrackerPlugin extends Plugin {
 		await this.loadSettings();
 		this.rebuildDataLayer();
 
-		this.registerView(VIEW_TYPE_EXAMPLE, (leaf) => new ExampleView(leaf));
+		this.registerView(
+			VIEW_TYPE_DASHBOARD,
+			(leaf) => new DashboardView(leaf, this),
+		);
 
-		this.addRibbonIcon("plus-circle", "Log Life Tracker event", () => {
-			this.openPicker();
+		this.addRibbonIcon("activity", "Open Life Tracker dashboard", () => {
+			this.openDashboard();
+		});
+
+		this.addCommand({
+			id: "open-dashboard",
+			name: "Open dashboard",
+			callback: () => this.openDashboard(),
 		});
 
 		this.addCommand({
@@ -87,27 +98,88 @@ export default class LifeTrackerPlugin extends Plugin {
 		}
 	}
 
+	async openDashboard(): Promise<void> {
+		const { workspace } = this.app;
+		let leaf: WorkspaceLeaf | null =
+			workspace.getLeavesOfType(VIEW_TYPE_DASHBOARD)[0] ?? null;
+		if (!leaf) {
+			leaf = workspace.getLeaf("tab");
+			await leaf.setViewState({
+				type: VIEW_TYPE_DASHBOARD,
+				active: true,
+			});
+		}
+		workspace.revealLeaf(leaf);
+	}
+
 	async openPicker(): Promise<void> {
 		const modal = new PickDefinitionModal(
 			this.app,
 			this.data,
 			this.settings.recentDefinitionIds,
 			(def) => {
-				new LogEventModal(this.app, this.data, def, (id) =>
-					this.recordRecent(id),
-				).open();
+				new LogEventModal(this.app, this.data, def, {
+					onLogged: (id) => this.recordRecent(id),
+				}).open();
 			},
 		);
 		await modal.load();
 		modal.open();
 	}
 
-	async openLogModal(definitionId: string): Promise<void> {
+	async openLogModal(
+		definitionId: string,
+		opts: { initialDate?: string } = {},
+	): Promise<void> {
 		const def = await this.data.getDefinition(definitionId);
-		if (!def) return;
-		new LogEventModal(this.app, this.data, def, (id) =>
-			this.recordRecent(id),
-		).open();
+		if (!def) {
+			new Notice(`Definition not found: ${definitionId}`);
+			return;
+		}
+		new LogEventModal(this.app, this.data, def, {
+			initialDate: opts.initialDate,
+			onLogged: (id) => this.recordRecent(id),
+		}).open();
+	}
+
+	async quickLog(definitionId: string): Promise<void> {
+		const def = await this.data.getDefinition(definitionId);
+		if (!def) {
+			new Notice(`Definition not found: ${definitionId}`);
+			return;
+		}
+		const required = (def.fieldSchema ?? []).filter(
+			(f) => f.required && !f.retired,
+		);
+		const isBoolean =
+			def.kind === "maintenance" ||
+			(def.kind === "habit" && def.valueType === "boolean");
+		if (!isBoolean || required.length > 0) {
+			return this.openLogModal(definitionId);
+		}
+		try {
+			await this.data.appendEvent(definitionId, {
+				id: "",
+				timestamp: new Date().toISOString(),
+				value: 1,
+				fields: {},
+			});
+			await this.recordRecent(definitionId);
+			new Notice(`Logged ${def.displayName}`);
+		} catch (err) {
+			new Notice(`Failed: ${(err as Error).message ?? String(err)}`);
+		}
+	}
+
+	async openEventDetail(definition: Definition, event: Event): Promise<void> {
+		new EventDetailModal(this.app, this.data, definition, event, {
+			onEdit: (def, ev) => {
+				new LogEventModal(this.app, this.data, def, {
+					mode: "edit",
+					existingEvent: ev,
+				}).open();
+			},
+		}).open();
 	}
 
 	async openNewDefinition(): Promise<void> {
@@ -129,6 +201,34 @@ export default class LifeTrackerPlugin extends Plugin {
 			existing,
 			existingIds,
 		}).open();
+	}
+
+	async archiveAndRefresh(definitionId: string): Promise<void> {
+		try {
+			await this.data.archiveDefinition(definitionId);
+			new Notice("Archived");
+		} catch (err) {
+			new Notice(`Failed: ${(err as Error).message ?? String(err)}`);
+		}
+	}
+
+	async unarchiveAndRefresh(definitionId: string): Promise<void> {
+		try {
+			await this.data.unarchiveDefinition(definitionId);
+			new Notice("Unarchived");
+		} catch (err) {
+			new Notice(`Failed: ${(err as Error).message ?? String(err)}`);
+		}
+	}
+
+	openPluginSettings(): void {
+		const setting = (this.app as unknown as { setting?: { open: () => void; openTabById: (id: string) => void } }).setting;
+		if (!setting) {
+			new Notice("Settings API unavailable");
+			return;
+		}
+		setting.open();
+		setting.openTabById(this.manifest.id);
 	}
 
 	private async recordRecent(id: string): Promise<void> {

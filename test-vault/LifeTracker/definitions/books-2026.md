@@ -50,3 +50,4 @@ Counter. Goal is 24 by year-end. Resets each January.
 - 2026-03-12T09:30 | 1 |  | id="01HW0BK00000000000000003" title="The Pragmatic Programmer" author="Hunt and Thomas" rating="3" genre="tech,career" format="audio"
 - 2026-02-18T22:00 | 1 | dense but worth it | id="01HW0BK00000000000000004" title="A Pattern Language" author="Christopher Alexander" rating="" genre="design,architecture" format="print"
 - 2026-01-09T19:30 | 1 | started the year right | id="01HW0BK00000000000000005" title="Project Hail Mary" author="Andy Weir" rating="5" genre="sci-fi" format="audiobook"
+- 2026-05-01T22:31 |  |  | id="01KQKBW4KPBZCY8KYHE9PF825R" title="hello world" author="==" rating="5" format=""

@@ -43,3 +43,4 @@ Reverse habit. Goal is to maximize the gap between events. Note required so futu
 - 2026-03-20T19:45 | 1 | scrolling while waiting for the bus, caught it quickly | id="01HW0DS00000000000000002" severity="2" trigger="boredom"
 - 2026-02-28T23:10 | 1 | bad day at work, defaulted to phone | id="01HW0DS00000000000000003" severity="4" trigger="stress" entered_at="2026-03-01T09:12"
 - 2026-02-14T20:00 | 1 | big lapse, lost the whole evening | id="01HW0DS00000000000000004" severity="6" trigger="loneliness"
+- 2026-05-01T22:32 | 1 |  | id="01KQKBX7B79XF4K1H2PQ6KM0P1" severity="5" trigger=""

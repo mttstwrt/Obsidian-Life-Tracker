@@ -108,6 +108,17 @@ export class DataLayer {
 		return out;
 	}
 
+	async loadEventsByDefinitionId(
+		range?: DateRange,
+	): Promise<Map<string, Event[]>> {
+		await this.loadDefinitions();
+		const out = new Map<string, Event[]>();
+		for (const entry of this.cache.values()) {
+			out.set(entry.definition.id, filterByRange(entry.events, range));
+		}
+		return out;
+	}
+
 	async appendEvent(definitionId: string, event: Event): Promise<Event> {
 		const entry = await this.requireEntry(definitionId);
 		const e: Event = { ...event };
