@@ -12,6 +12,7 @@ schemaVersion: 1
 valueType: duration
 unit: minutes
 targetCadence: 4/week
+defaultDuration: 60
 fieldSchema:
   - key: quality
     type: number

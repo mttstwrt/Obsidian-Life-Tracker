@@ -253,6 +253,16 @@
 					placeholder="exercise, cardio"
 				/>
 			</label>
+			<label class="lt-defform__label">
+				<span>Default plan duration <small>(minutes, optional)</small></span>
+				<input
+					type="text"
+					inputmode="numeric"
+					bind:value={form.defaultDurationMinutes}
+					placeholder="30"
+				/>
+				<small>Plan tab will prefill the end time from this.</small>
+			</label>
 		</fieldset>
 
 		{#if form.kind === "habit"}

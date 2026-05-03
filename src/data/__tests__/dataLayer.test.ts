@@ -198,6 +198,26 @@ describe("DataLayer", () => {
 		expect(all[1].timestamp).toBe("2026-04-28T07:14");
 	});
 
+	test("defaultDuration survives parse/serialize round-trip", () => {
+		const def: Definition = {
+			...RUN_DEF,
+			defaultDuration: 30,
+		};
+		const content = buildDefinitionFile(def, "", []);
+		expect(content).toContain("defaultDuration: 30");
+		const parsed = parseDefinitionFile(content);
+		if (!parsed.ok) throw new Error(parsed.error);
+		expect(parsed.definition.defaultDuration).toBe(30);
+	});
+
+	test("missing defaultDuration parses as undefined and is not serialized", () => {
+		const content = buildDefinitionFile(RUN_DEF, "", []);
+		expect(content).not.toContain("defaultDuration");
+		const parsed = parseDefinitionFile(content);
+		if (!parsed.ok) throw new Error(parsed.error);
+		expect(parsed.definition.defaultDuration).toBeUndefined();
+	});
+
 	test("definition file with body and existing events round-trips", () => {
 		const events: Event[] = [
 			{

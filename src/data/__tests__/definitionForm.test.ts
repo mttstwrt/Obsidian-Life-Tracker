@@ -419,4 +419,74 @@ describe("definitionToFormInput round-trips", () => {
 		if (!r.ok) throw new Error(r.error);
 		expect(r.definition).toEqual(def);
 	});
+
+	test("defaultDuration round-trips", () => {
+		const def: Definition = {
+			id: "japanese",
+			displayName: "Japanese",
+			kind: "habit",
+			status: "active",
+			tags: [],
+			created: "2026-01-01",
+			schemaVersion: 1,
+			valueType: "duration",
+			unit: "minutes",
+			targetCadence: "1/day",
+			defaultDuration: 30,
+		};
+		const input = definitionToFormInput(def);
+		expect(input.defaultDurationMinutes).toBe("30");
+		const r = buildDefinitionFromInput(input, opts({ existing: def }));
+		if (!r.ok) throw new Error(r.error);
+		expect(r.definition.defaultDuration).toBe(30);
+	});
+});
+
+describe("buildDefinitionFromInput — defaultDuration validation", () => {
+	test("blank → undefined", () => {
+		const r = buildDefinitionFromInput(habit(), opts());
+		if (!r.ok) throw new Error(r.error);
+		expect(r.definition.defaultDuration).toBeUndefined();
+	});
+
+	test("positive integer accepted", () => {
+		const r = buildDefinitionFromInput(
+			habit({ defaultDurationMinutes: "90" }),
+			opts(),
+		);
+		if (!r.ok) throw new Error(r.error);
+		expect(r.definition.defaultDuration).toBe(90);
+	});
+
+	test("zero rejected", () => {
+		const r = buildDefinitionFromInput(
+			habit({ defaultDurationMinutes: "0" }),
+			opts(),
+		);
+		expect(r.ok).toBe(false);
+	});
+
+	test("negative rejected", () => {
+		const r = buildDefinitionFromInput(
+			habit({ defaultDurationMinutes: "-15" }),
+			opts(),
+		);
+		expect(r.ok).toBe(false);
+	});
+
+	test("non-integer rejected", () => {
+		const r = buildDefinitionFromInput(
+			habit({ defaultDurationMinutes: "30.5" }),
+			opts(),
+		);
+		expect(r.ok).toBe(false);
+	});
+
+	test("garbage rejected", () => {
+		const r = buildDefinitionFromInput(
+			habit({ defaultDurationMinutes: "thirty" }),
+			opts(),
+		);
+		expect(r.ok).toBe(false);
+	});
 });

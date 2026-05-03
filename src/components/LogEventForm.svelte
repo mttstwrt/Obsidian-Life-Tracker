@@ -86,12 +86,38 @@
 	let submitting = $state(false);
 	let confirmStage = $state(false);
 
+	function addMinutesToTime(time: string, minutes: number): string {
+		const m = /^(\d{2}):(\d{2})$/.exec(time);
+		if (!m || !Number.isFinite(minutes) || minutes <= 0) return time;
+		const total = (Number(m[1]) * 60 + Number(m[2]) + minutes) % (24 * 60);
+		const h = Math.floor(total / 60);
+		const mm = total % 60;
+		return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+	}
+
+	function initialPlanEnd(): string {
+		if (definition.kind === "maintenance") return "";
+		if (definition.defaultDuration && definition.defaultDuration > 0) {
+			return addMinutesToTime(initialTime, definition.defaultDuration);
+		}
+		return "";
+	}
+
 	let planDate = $state(untrack(() => initialDate));
 	let planStart = $state(untrack(() => initialTime));
-	let planEnd = $state("");
+	let planEnd = $state(untrack(() => initialPlanEnd()));
+	let planEndTouched = $state(false);
 	let planLabel = $state("");
 	let planError = $state("");
 	let planning = $state(false);
+
+	$effect(() => {
+		if (planEndTouched) return;
+		if (definition.kind === "maintenance") return;
+		const dur = definition.defaultDuration;
+		if (!dur || dur <= 0) return;
+		planEnd = addMinutesToTime(planStart, dur);
+	});
 
 	const activeFields = $derived(
 		(definition.fieldSchema ?? []).filter(
@@ -357,7 +383,11 @@
 				</label>
 				<label class="lt-form__label">
 					<span>End <small>(optional)</small></span>
-					<input type="time" bind:value={planEnd} />
+					<input
+						type="time"
+						bind:value={planEnd}
+						oninput={() => (planEndTouched = true)}
+					/>
 				</label>
 			</fieldset>
 

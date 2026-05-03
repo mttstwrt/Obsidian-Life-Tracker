@@ -26,6 +26,7 @@ export interface DefinitionFormInput {
 	displayName: string;
 	emoji?: string;
 	tagsCsv?: string;
+	defaultDurationMinutes?: string;
 	valueType?: "boolean" | "count" | "duration" | "custom";
 	unit?: string;
 	targetCadence?: string;
@@ -142,6 +143,20 @@ export function buildDefinitionFromInput(
 	const status = editing ? opts.existing!.status : "active";
 	const emoji = input.emoji?.trim() === "" ? undefined : input.emoji?.trim();
 
+	const defaultDurationRaw = (input.defaultDurationMinutes ?? "").trim();
+	let defaultDuration: number | undefined;
+	if (defaultDurationRaw !== "") {
+		const parsed = Number(defaultDurationRaw);
+		if (!Number.isFinite(parsed) || parsed <= 0 || !Number.isInteger(parsed)) {
+			return {
+				ok: false,
+				error: "Default duration must be a positive whole number of minutes",
+				field: "defaultDurationMinutes",
+			};
+		}
+		defaultDuration = parsed;
+	}
+
 	const base = {
 		id,
 		displayName,
@@ -151,6 +166,7 @@ export function buildDefinitionFromInput(
 		created,
 		schemaVersion,
 		fieldSchema: fieldSchema.length > 0 ? fieldSchema : undefined,
+		defaultDuration,
 	};
 
 	let definition: Definition;
@@ -400,6 +416,7 @@ export function emptyFormInput(kind: DefinitionKind): DefinitionFormInput {
 		displayName: "",
 		emoji: "",
 		tagsCsv: "",
+		defaultDurationMinutes: "",
 		fieldSchema: [],
 	};
 	switch (kind) {
@@ -435,6 +452,8 @@ export function definitionToFormInput(def: Definition): DefinitionFormInput {
 		displayName: def.displayName,
 		emoji: def.emoji ?? "",
 		tagsCsv: def.tags.join(", "),
+		defaultDurationMinutes:
+			def.defaultDuration !== undefined ? String(def.defaultDuration) : "",
 		fieldSchema,
 	};
 	switch (def.kind) {

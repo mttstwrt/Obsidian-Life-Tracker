@@ -137,6 +137,7 @@ function buildDefinition(
 			: CURRENT_SCHEMA_VERSION;
 	const emoji = stringField(raw, "emoji");
 	const fieldSchema = parseFieldSchema(raw.fieldSchema);
+	const defaultDuration = numberField(raw, "defaultDuration");
 
 	const base = {
 		id,
@@ -147,6 +148,10 @@ function buildDefinition(
 		created,
 		schemaVersion,
 		fieldSchema,
+		defaultDuration:
+			defaultDuration !== undefined && defaultDuration > 0
+				? defaultDuration
+				: undefined,
 	};
 
 	switch (kind) {
@@ -334,6 +339,10 @@ function definitionToYamlObject(def: Definition): Record<string, unknown> {
 			if (def.resetCadence !== undefined)
 				out.resetCadence = def.resetCadence;
 			break;
+	}
+
+	if (def.defaultDuration !== undefined) {
+		out.defaultDuration = def.defaultDuration;
 	}
 
 	if (def.fieldSchema && def.fieldSchema.length > 0) {

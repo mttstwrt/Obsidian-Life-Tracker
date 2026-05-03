@@ -52,6 +52,8 @@ interface BaseDefinition {
 	created: string;
 	schemaVersion: number;
 	fieldSchema?: FieldDef[];
+	/** Default planned-block length in minutes; used by the Plan tab to prefill end time. */
+	defaultDuration?: number;
 }
 
 export interface HabitDefinition extends BaseDefinition {
