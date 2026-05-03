@@ -1,0 +1,107 @@
+import { type App, moment as obsidianMoment } from "obsidian";
+
+// Obsidian re-exports moment as `typeof Moment` (the namespace), which TS doesn't see as callable
+// even though it is at runtime. Cast to the callable function form.
+type MomentFactory = (input: string, format: string) => { format(f: string): string };
+const moment = obsidianMoment as unknown as MomentFactory;
+import {
+	DEFAULT_DAILY_NOTE_FORMAT,
+	type DailyNoteConfig,
+	dailyNotePath,
+	findOpenSlot,
+	insertUnderHeading,
+	parsePlannedBlocks,
+} from "./dailyNote";
+import type { VaultAdapter } from "./vaultAdapter";
+
+export function resolveDailyNoteConfig(app: App): DailyNoteConfig {
+	const internal = (
+		app as unknown as {
+			internalPlugins?: {
+				getPluginById?: (id: string) => {
+					enabled?: boolean;
+					instance?: { options?: { folder?: string; format?: string } };
+				} | null;
+			};
+		}
+	).internalPlugins;
+	const plugin = internal?.getPluginById?.("daily-notes");
+	const opts = plugin?.instance?.options;
+	return {
+		folder: opts?.folder?.trim() ?? "",
+		format: opts?.format?.trim() || DEFAULT_DAILY_NOTE_FORMAT,
+	};
+}
+
+export interface AddPlanLineOpts {
+	app: App;
+	vault: VaultAdapter;
+	date: string;
+	heading: string;
+	line: string;
+}
+
+export async function addPlanLineToDailyNote(
+	opts: AddPlanLineOpts,
+): Promise<string> {
+	const config = resolveDailyNoteConfig(opts.app);
+	const path = dailyNotePath(opts.date, config, (date, format) =>
+		moment(date, "YYYY-MM-DD").format(format),
+	);
+
+	if (await opts.vault.exists(path)) {
+		const content = await opts.vault.read(path);
+		const updated = insertUnderHeading(content, opts.heading, opts.line);
+		await opts.vault.write(path, updated);
+	} else {
+		const slashIdx = path.lastIndexOf("/");
+		if (slashIdx > 0) {
+			await opts.vault.ensureFolder(path.slice(0, slashIdx));
+		}
+		const seed = insertUnderHeading("", opts.heading, opts.line);
+		await opts.vault.create(path, seed);
+	}
+
+	return path;
+}
+
+export interface FindOpenSlotForDateOpts {
+	app: App;
+	vault: VaultAdapter;
+	date: string;
+	heading: string;
+	durationMin: number;
+	now?: () => Date;
+}
+
+export async function findOpenSlotForDate(
+	opts: FindOpenSlotForDateOpts,
+): Promise<string | null> {
+	const config = resolveDailyNoteConfig(opts.app);
+	const path = dailyNotePath(opts.date, config, (date, format) =>
+		moment(date, "YYYY-MM-DD").format(format),
+	);
+	const blocks = (await opts.vault.exists(path))
+		? parsePlannedBlocks(await opts.vault.read(path), opts.heading)
+		: [];
+	const now = (opts.now ?? (() => new Date()))();
+	const todayStr = localDateString(now);
+	const notBeforeMin =
+		opts.date === todayStr
+			? now.getHours() * 60 + now.getMinutes()
+			: opts.date < todayStr
+				? Number.POSITIVE_INFINITY // past day → no future slots possible
+				: undefined;
+	return findOpenSlot({
+		blocks,
+		durationMin: opts.durationMin,
+		notBeforeMin,
+	});
+}
+
+function localDateString(d: Date): string {
+	const y = d.getFullYear();
+	const m = String(d.getMonth() + 1).padStart(2, "0");
+	const day = String(d.getDate()).padStart(2, "0");
+	return `${y}-${m}-${day}`;
+}

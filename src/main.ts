@@ -1,6 +1,9 @@
 import { Notice, Plugin, type WorkspaceLeaf } from "obsidian";
 import { DataLayer } from "./data/dataLayer";
-import { addPlanLineToDailyNote } from "./data/dailyNoteService";
+import {
+	addPlanLineToDailyNote,
+	findOpenSlotForDate,
+} from "./data/dailyNoteService";
 import type { PlanFormSuccess } from "./data/planForm";
 import { ObsidianVaultAdapter, type VaultAdapter } from "./data/vaultAdapter";
 import type { Definition, Event } from "./data/types";
@@ -198,6 +201,8 @@ export default class LifeTrackerPlugin extends Plugin {
 				new LogEventModal(this.app, this.data, def, {
 					onLogged: (id) => this.recordRecent(id),
 					onPlan: (planned) => this.handlePlan(def, planned),
+					findSlot: (date, durationMin) =>
+						this.findOpenSlot(date, durationMin),
 				}).open();
 			},
 		);
@@ -218,7 +223,22 @@ export default class LifeTrackerPlugin extends Plugin {
 			initialDate: opts.initialDate,
 			onLogged: (id) => this.recordRecent(id),
 			onPlan: (planned) => this.handlePlan(def, planned),
+			findSlot: (date, durationMin) =>
+				this.findOpenSlot(date, durationMin),
 		}).open();
+	}
+
+	private findOpenSlot(
+		date: string,
+		durationMin: number,
+	): Promise<string | null> {
+		return findOpenSlotForDate({
+			app: this.app,
+			vault: this.vaultAdapter,
+			date,
+			heading: this.settings.planHeading,
+			durationMin,
+		});
 	}
 
 	private async handlePlan(

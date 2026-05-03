@@ -12,6 +12,7 @@ export interface LogEventModalOpts {
 	initialDate?: string;
 	onLogged?: (definitionId: string) => void;
 	onPlan?: (planned: PlanFormSuccess) => Promise<void> | void;
+	findSlot?: (date: string, durationMin: number) => Promise<string | null>;
 }
 
 export class LogEventModal extends Modal {
@@ -21,6 +22,10 @@ export class LogEventModal extends Modal {
 	private initialDate?: string;
 	private onLogged?: (definitionId: string) => void;
 	private onPlan?: (planned: PlanFormSuccess) => Promise<void> | void;
+	private findSlot?: (
+		date: string,
+		durationMin: number,
+	) => Promise<string | null>;
 
 	constructor(
 		app: App,
@@ -39,6 +44,7 @@ export class LogEventModal extends Modal {
 			this.initialDate = opts.initialDate;
 			this.onLogged = opts.onLogged;
 			this.onPlan = opts.onPlan;
+			this.findSlot = opts.findSlot;
 		}
 	}
 
@@ -56,6 +62,7 @@ export class LogEventModal extends Modal {
 				mode: this.mode,
 				existingEvent: this.existingEvent,
 				initialDate: this.initialDate,
+				findSlot: this.findSlot,
 				onPlan: this.onPlan
 					? async (planned: PlanFormSuccess) => {
 							try {

@@ -26,6 +26,7 @@
 		initialTime: initialTimeProp,
 		onSubmit,
 		onPlan,
+		findSlot,
 		onCancel,
 	}: {
 		definition: Definition;
@@ -37,6 +38,7 @@
 			submitted: Submitted,
 		) => Promise<void> | void;
 		onPlan?: (planned: PlanFormSuccess) => Promise<void> | void;
+		findSlot?: (date: string, durationMin: number) => Promise<string | null>;
 		onCancel: () => void;
 	} = $props();
 
@@ -110,6 +112,9 @@
 	let planLabel = $state("");
 	let planError = $state("");
 	let planning = $state(false);
+	let slotAuto = $state(false);
+	let slotMessage = $state("");
+	let slotSearching = $state(false);
 
 	$effect(() => {
 		if (planEndTouched) return;
@@ -118,6 +123,64 @@
 		if (!dur || dur <= 0) return;
 		planEnd = addMinutesToTime(planStart, dur);
 	});
+
+	function timeToMinutes(t: string): number | null {
+		const m = /^(\d{2}):(\d{2})$/.exec(t);
+		if (!m) return null;
+		return Number(m[1]) * 60 + Number(m[2]);
+	}
+
+	function plannedDurationMin(): number | null {
+		const startM = timeToMinutes(planStart);
+		const endM = timeToMinutes(planEnd);
+		if (startM !== null && endM !== null && endM > startM) {
+			return endM - startM;
+		}
+		if (definition.defaultDuration && definition.defaultDuration > 0) {
+			return definition.defaultDuration;
+		}
+		return null;
+	}
+
+	async function applyOpenSlot() {
+		if (!findSlot) return;
+		const dur = plannedDurationMin();
+		if (dur === null) {
+			slotMessage = "Set a default duration or end time first.";
+			return;
+		}
+		slotSearching = true;
+		try {
+			const slot = await findSlot(planDate, dur);
+			if (!slot) {
+				slotMessage = "No open slot fits that duration today.";
+				return;
+			}
+			planStart = slot;
+			planEnd = addMinutesToTime(slot, dur);
+			planEndTouched = true; // stop the defaultDuration auto-prefill from clobbering
+			slotAuto = true;
+			slotMessage = `Suggested ${slot} – ${planEnd}.`;
+		} catch (err) {
+			slotMessage = `Slot search failed: ${(err as Error).message ?? String(err)}`;
+		} finally {
+			slotSearching = false;
+		}
+	}
+
+	function onPlanStartInput() {
+		slotAuto = false;
+		slotMessage = "";
+	}
+
+	function onPlanEndInput() {
+		planEndTouched = true;
+		if (slotAuto) void applyOpenSlot();
+	}
+
+	function onPlanDateInput() {
+		if (slotAuto) void applyOpenSlot();
+	}
 
 	const activeFields = $derived(
 		(definition.fieldSchema ?? []).filter(
@@ -375,21 +438,46 @@
 			<fieldset class="lt-form__row lt-form__row--datetime">
 				<label class="lt-form__label">
 					<span>Date</span>
-					<input type="date" bind:value={planDate} />
+					<input
+						type="date"
+						bind:value={planDate}
+						oninput={onPlanDateInput}
+					/>
 				</label>
 				<label class="lt-form__label">
 					<span>Start</span>
-					<input type="time" bind:value={planStart} />
+					<input
+						type="time"
+						bind:value={planStart}
+						oninput={onPlanStartInput}
+					/>
 				</label>
 				<label class="lt-form__label">
 					<span>End <small>(optional)</small></span>
 					<input
 						type="time"
 						bind:value={planEnd}
-						oninput={() => (planEndTouched = true)}
+						oninput={onPlanEndInput}
 					/>
 				</label>
 			</fieldset>
+
+			{#if findSlot}
+				<div class="lt-form__slot">
+					<button
+						type="button"
+						class="lt-form__slotbtn"
+						class:lt-form__slotbtn--active={slotAuto}
+						disabled={slotSearching}
+						onclick={applyOpenSlot}
+					>
+						{slotSearching ? "Searching…" : slotAuto ? "Re-find open slot" : "Find open slot"}
+					</button>
+					{#if slotMessage}
+						<small class="lt-form__slotmsg">{slotMessage}</small>
+					{/if}
+				</div>
+			{/if}
 
 			<label class="lt-form__label">
 				<span>Label <small>(defaults to "{definition.displayName}")</small></span>
@@ -457,6 +545,22 @@
 		margin: 0;
 		font-size: 0.85rem;
 		color: var(--text-muted);
+	}
+	.lt-form__slot {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+	.lt-form__slotbtn {
+		font-size: 0.85rem;
+	}
+	.lt-form__slotbtn--active {
+		background: var(--background-modifier-hover);
+	}
+	.lt-form__slotmsg {
+		color: var(--text-muted);
+		font-size: 0.8rem;
 	}
 	.lt-form__row {
 		display: flex;
