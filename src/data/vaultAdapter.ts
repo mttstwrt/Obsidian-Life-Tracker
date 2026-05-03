@@ -11,6 +11,7 @@ export interface VaultAdapter {
 	read(path: string): Promise<string>;
 	write(path: string, content: string): Promise<void>;
 	create(path: string, content: string): Promise<void>;
+	ensureFolder(path: string): Promise<void>;
 	rename(oldPath: string, newPath: string): Promise<void>;
 	delete(path: string): Promise<void>;
 	mtime(path: string): Promise<number | null>;
@@ -46,6 +47,22 @@ export class ObsidianVaultAdapter implements VaultAdapter {
 
 	async create(path: string, content: string): Promise<void> {
 		await this.vault.create(path, content);
+	}
+
+	async ensureFolder(path: string): Promise<void> {
+		const trimmed = path.replace(/^\/+|\/+$/g, "");
+		if (!trimmed) return;
+		const segments = trimmed.split("/");
+		let acc = "";
+		for (const seg of segments) {
+			acc = acc ? `${acc}/${seg}` : seg;
+			if (this.vault.getAbstractFileByPath(acc)) continue;
+			try {
+				await this.vault.createFolder(acc);
+			} catch {
+				// race / already created — ignore
+			}
+		}
 	}
 
 	async rename(oldPath: string, newPath: string): Promise<void> {
@@ -118,6 +135,10 @@ export class InMemoryVaultAdapter implements VaultAdapter {
 			throw new Error(`file already exists: ${path}`);
 		}
 		this.files.set(path, { content, mtime: this.clock() });
+	}
+
+	async ensureFolder(_path: string): Promise<void> {
+		// in-memory adapter has no folder concept — files are flat by path
 	}
 
 	async rename(oldPath: string, newPath: string): Promise<void> {

@@ -1,6 +1,8 @@
 import { Notice, Plugin, type WorkspaceLeaf } from "obsidian";
 import { DataLayer } from "./data/dataLayer";
-import { ObsidianVaultAdapter } from "./data/vaultAdapter";
+import { addPlanLineToDailyNote } from "./data/dailyNoteService";
+import type { PlanFormSuccess } from "./data/planForm";
+import { ObsidianVaultAdapter, type VaultAdapter } from "./data/vaultAdapter";
 import type { Definition, Event } from "./data/types";
 import { DashboardView, VIEW_TYPE_DASHBOARD } from "./views/DashboardView";
 import { DefinitionFormModal } from "./views/DefinitionFormModal";
@@ -15,6 +17,7 @@ export type OrderTabKey = "habits" | "counters" | "maintenance" | "projects";
 
 interface LifeTrackerSettings {
 	rootFolder: string;
+	planHeading: string;
 	recentDefinitionIds: string[];
 	quickLogIds: string[];
 	definitionOrder: Record<OrderTabKey, string[]>;
@@ -22,6 +25,7 @@ interface LifeTrackerSettings {
 
 const DEFAULT_SETTINGS: LifeTrackerSettings = {
 	rootFolder: "LifeTracker",
+	planHeading: "Timeline",
 	recentDefinitionIds: [],
 	quickLogIds: [],
 	definitionOrder: { habits: [], counters: [], maintenance: [], projects: [] },
@@ -32,6 +36,7 @@ const RECENT_LIMIT = 20;
 export default class LifeTrackerPlugin extends Plugin {
 	settings!: LifeTrackerSettings;
 	data!: DataLayer;
+	private vaultAdapter!: VaultAdapter;
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -102,10 +107,17 @@ export default class LifeTrackerPlugin extends Plugin {
 	}
 
 	rebuildDataLayer(): void {
-		this.data = new DataLayer(
-			new ObsidianVaultAdapter(this.app.vault),
-			this.settings.rootFolder,
-		);
+		this.vaultAdapter = new ObsidianVaultAdapter(this.app.vault);
+		this.data = new DataLayer(this.vaultAdapter, this.settings.rootFolder);
+		void this.ensureRootFolder();
+	}
+
+	private async ensureRootFolder(): Promise<void> {
+		try {
+			await this.vaultAdapter.ensureFolder(this.data.definitionsFolder);
+		} catch (err) {
+			console.warn("[life-tracker] failed to ensure root folder:", err);
+		}
 	}
 
 	async onload() {
@@ -185,6 +197,7 @@ export default class LifeTrackerPlugin extends Plugin {
 			(def) => {
 				new LogEventModal(this.app, this.data, def, {
 					onLogged: (id) => this.recordRecent(id),
+					onPlan: (planned) => this.handlePlan(def, planned),
 				}).open();
 			},
 		);
@@ -204,7 +217,27 @@ export default class LifeTrackerPlugin extends Plugin {
 		new LogEventModal(this.app, this.data, def, {
 			initialDate: opts.initialDate,
 			onLogged: (id) => this.recordRecent(id),
+			onPlan: (planned) => this.handlePlan(def, planned),
 		}).open();
+	}
+
+	private async handlePlan(
+		def: Definition,
+		planned: PlanFormSuccess,
+	): Promise<void> {
+		try {
+			const path = await addPlanLineToDailyNote({
+				app: this.app,
+				vault: this.vaultAdapter,
+				date: planned.date,
+				heading: this.settings.planHeading,
+				line: planned.line,
+			});
+			new Notice(`Planned ${def.displayName} → ${path}`);
+		} catch (err) {
+			new Notice(`Failed to plan: ${(err as Error).message ?? String(err)}`);
+			throw err;
+		}
 	}
 
 	async quickLog(definitionId: string): Promise<void> {

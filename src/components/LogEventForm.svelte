@@ -11,6 +11,7 @@
 		localTimeString,
 		valueExpected,
 	} from "../data/logForm";
+	import { buildPlanLine, type PlanFormSuccess } from "../data/planForm";
 
 	type Submitted = Extract<
 		ReturnType<typeof buildLogEvent>,
@@ -24,6 +25,7 @@
 		initialDate: initialDateProp,
 		initialTime: initialTimeProp,
 		onSubmit,
+		onPlan,
 		onCancel,
 	}: {
 		definition: Definition;
@@ -34,6 +36,7 @@
 		onSubmit: (
 			submitted: Submitted,
 		) => Promise<void> | void;
+		onPlan?: (planned: PlanFormSuccess) => Promise<void> | void;
 		onCancel: () => void;
 	} = $props();
 
@@ -57,6 +60,9 @@
 	const initialDate = untrack(() => pickInitialDate());
 	const initialTime = untrack(() => pickInitialTime());
 
+	const planEnabled = $derived(mode !== "edit" && !!onPlan);
+	let activeTab: "log" | "plan" = $state("log");
+
 	let date = $state(untrack(() => initialDate));
 	let time = $state(untrack(() => initialTime));
 	let valueRaw = $state(
@@ -79,6 +85,13 @@
 	let error = $state("");
 	let submitting = $state(false);
 	let confirmStage = $state(false);
+
+	let planDate = $state(untrack(() => initialDate));
+	let planStart = $state(untrack(() => initialTime));
+	let planEnd = $state("");
+	let planLabel = $state("");
+	let planError = $state("");
+	let planning = $state(false);
 
 	const activeFields = $derived(
 		(definition.fieldSchema ?? []).filter(
@@ -146,9 +159,35 @@
 			submitting = false;
 		}
 	}
+
+	async function handlePlan(e?: Event) {
+		e?.preventDefault();
+		if (!onPlan || planning) return;
+		planError = "";
+
+		const result = buildPlanLine(definition, {
+			date: planDate,
+			startTime: planStart,
+			endTime: planEnd,
+			label: planLabel,
+		});
+
+		if (!result.ok) {
+			planError = result.error;
+			return;
+		}
+
+		planning = true;
+		try {
+			await onPlan(result);
+		} catch (err) {
+			planError = (err as Error).message ?? "Failed to plan";
+			planning = false;
+		}
+	}
 </script>
 
-<form class="lt-form" onsubmit={handleSubmit}>
+<div class="lt-form">
 	<header class="lt-form__header">
 		<span class="lt-form__emoji" aria-hidden="true"
 			>{definition.emoji ?? "•"}</span
@@ -158,122 +197,188 @@
 		</h2>
 	</header>
 
-	{#if confirmStage}
-		<div class="lt-confirm">
-			<p>
-				Logging a <strong>reverse habit</strong> resets the time-since
-				counter. Are you sure?
-			</p>
-			<div class="lt-confirm__actions">
-				<button type="button" onclick={() => (confirmStage = false)}
-					>Back</button
-				>
-				<button type="submit" class="lt-form__primary" disabled={submitting}
-					>Yes, log it</button
-				>
-			</div>
-		</div>
-	{:else}
-		<fieldset class="lt-form__row lt-form__row--datetime">
-			<label class="lt-form__label">
-				<span>Date</span>
-				<input type="date" bind:value={date} />
-			</label>
-			<label class="lt-form__label">
-				<span>Time</span>
-				<input type="time" bind:value={time} />
-			</label>
-		</fieldset>
-
-		{#if expected === "number"}
-			<label class="lt-form__label">
-				<span>{valueLabel || "Value"}</span>
-				<input
-					type="number"
-					inputmode="decimal"
-					bind:value={valueRaw}
-				/>
-			</label>
-		{/if}
-
-		<label class="lt-form__label">
-			<span>Note{noteRequired ? " *" : ""}</span>
-			<textarea
-				rows="2"
-				placeholder="Optional"
-				bind:value={note}
-			></textarea>
-		</label>
-
-		{#each activeFields as field (field.key)}
-			<label class="lt-form__label" for={fieldId(field)}>
-				<span>
-					{field.prompt ?? field.key}
-					{#if field.required}<em class="lt-form__req">*</em>{/if}
-				</span>
-				{#if field.type === "boolean"}
-					<select id={fieldId(field)} bind:value={fieldRaws[field.key]}>
-						<option value="">—</option>
-						<option value="true">true</option>
-						<option value="false">false</option>
-					</select>
-				{:else if field.type === "enum"}
-					<select id={fieldId(field)} bind:value={fieldRaws[field.key]}>
-						<option value="">—</option>
-						{#each field.options ?? [] as opt (opt)}
-							<option value={opt}>{opt}</option>
-						{/each}
-					</select>
-				{:else if field.type === "number"}
-					{#if field.range}
-						<div class="lt-form__range">
-							<input
-								id={fieldId(field)}
-								type="range"
-								min={field.range[0]}
-								max={field.range[1]}
-								step="1"
-								bind:value={fieldRaws[field.key]}
-							/>
-							<output>{fieldRaws[field.key] ?? ""}</output>
-						</div>
-					{:else}
-						<input
-							id={fieldId(field)}
-							type="number"
-							inputmode="decimal"
-							bind:value={fieldRaws[field.key]}
-						/>
-					{/if}
-				{:else if field.type === "list"}
-					<input
-						id={fieldId(field)}
-						type="text"
-						placeholder="comma,separated"
-						bind:value={fieldRaws[field.key]}
-					/>
-				{:else}
-					<input
-						id={fieldId(field)}
-						type="text"
-						bind:value={fieldRaws[field.key]}
-					/>
-				{/if}
-			</label>
-		{/each}
-
-		{#if error}
-			<div class="lt-form__error" role="alert">{error}</div>
-		{/if}
-
-		<div class="lt-form__actions">
-			<button type="button" onclick={onCancel}>Cancel</button>
-			<button type="submit" class="lt-form__primary" disabled={submitting}>
-				{mode === "edit" ? "Save" : expected === "boolean" ? "Log" : "Save"}
+	{#if planEnabled}
+		<div class="lt-tabs" role="tablist">
+			<button
+				type="button"
+				role="tab"
+				aria-selected={activeTab === "log"}
+				class="lt-tabs__tab"
+				class:lt-tabs__tab--active={activeTab === "log"}
+				onclick={() => (activeTab = "log")}
+			>
+				Log
+			</button>
+			<button
+				type="button"
+				role="tab"
+				aria-selected={activeTab === "plan"}
+				class="lt-tabs__tab"
+				class:lt-tabs__tab--active={activeTab === "plan"}
+				onclick={() => (activeTab = "plan")}
+			>
+				Plan
 			</button>
 		</div>
 	{/if}
-</form>
+
+	{#if activeTab === "log" || !planEnabled}
+		<form class="lt-form__body" onsubmit={handleSubmit}>
+			{#if confirmStage}
+				<div class="lt-confirm">
+					<p>
+						Logging a <strong>reverse habit</strong> resets the time-since
+						counter. Are you sure?
+					</p>
+					<div class="lt-confirm__actions">
+						<button type="button" onclick={() => (confirmStage = false)}
+							>Back</button
+						>
+						<button type="submit" class="lt-form__primary" disabled={submitting}
+							>Yes, log it</button
+						>
+					</div>
+				</div>
+			{:else}
+				<fieldset class="lt-form__row lt-form__row--datetime">
+					<label class="lt-form__label">
+						<span>Date</span>
+						<input type="date" bind:value={date} />
+					</label>
+					<label class="lt-form__label">
+						<span>Time</span>
+						<input type="time" bind:value={time} />
+					</label>
+				</fieldset>
+
+				{#if expected === "number"}
+					<label class="lt-form__label">
+						<span>{valueLabel || "Value"}</span>
+						<input
+							type="number"
+							inputmode="decimal"
+							bind:value={valueRaw}
+						/>
+					</label>
+				{/if}
+
+				<label class="lt-form__label">
+					<span>Note{noteRequired ? " *" : ""}</span>
+					<textarea
+						rows="2"
+						placeholder="Optional"
+						bind:value={note}
+					></textarea>
+				</label>
+
+				{#each activeFields as field (field.key)}
+					<label class="lt-form__label" for={fieldId(field)}>
+						<span>
+							{field.prompt ?? field.key}
+							{#if field.required}<em class="lt-form__req">*</em>{/if}
+						</span>
+						{#if field.type === "boolean"}
+							<select id={fieldId(field)} bind:value={fieldRaws[field.key]}>
+								<option value="">—</option>
+								<option value="true">true</option>
+								<option value="false">false</option>
+							</select>
+						{:else if field.type === "enum"}
+							<select id={fieldId(field)} bind:value={fieldRaws[field.key]}>
+								<option value="">—</option>
+								{#each field.options ?? [] as opt (opt)}
+									<option value={opt}>{opt}</option>
+								{/each}
+							</select>
+						{:else if field.type === "number"}
+							{#if field.range}
+								<div class="lt-form__range">
+									<input
+										id={fieldId(field)}
+										type="range"
+										min={field.range[0]}
+										max={field.range[1]}
+										step="1"
+										bind:value={fieldRaws[field.key]}
+									/>
+									<output>{fieldRaws[field.key] ?? ""}</output>
+								</div>
+							{:else}
+								<input
+									id={fieldId(field)}
+									type="number"
+									inputmode="decimal"
+									bind:value={fieldRaws[field.key]}
+								/>
+							{/if}
+						{:else if field.type === "list"}
+							<input
+								id={fieldId(field)}
+								type="text"
+								placeholder="comma,separated"
+								bind:value={fieldRaws[field.key]}
+							/>
+						{:else}
+							<input
+								id={fieldId(field)}
+								type="text"
+								bind:value={fieldRaws[field.key]}
+							/>
+						{/if}
+					</label>
+				{/each}
+
+				{#if error}
+					<div class="lt-form__error" role="alert">{error}</div>
+				{/if}
+
+				<div class="lt-form__actions">
+					<button type="button" onclick={onCancel}>Cancel</button>
+					<button type="submit" class="lt-form__primary" disabled={submitting}>
+						{mode === "edit" ? "Save" : expected === "boolean" ? "Log" : "Save"}
+					</button>
+				</div>
+			{/if}
+		</form>
+	{:else}
+		<form class="lt-form__body" onsubmit={handlePlan}>
+			<p class="lt-form__hint">
+				Adds a line to the daily note for the chosen date so the Day Planner plugin can pick it up.
+			</p>
+
+			<fieldset class="lt-form__row lt-form__row--datetime">
+				<label class="lt-form__label">
+					<span>Date</span>
+					<input type="date" bind:value={planDate} />
+				</label>
+				<label class="lt-form__label">
+					<span>Start</span>
+					<input type="time" bind:value={planStart} />
+				</label>
+				<label class="lt-form__label">
+					<span>End <small>(optional)</small></span>
+					<input type="time" bind:value={planEnd} />
+				</label>
+			</fieldset>
+
+			<label class="lt-form__label">
+				<span>Label <small>(defaults to "{definition.displayName}")</small></span>
+				<input type="text" bind:value={planLabel} placeholder={definition.displayName} />
+			</label>
+
+			{#if planError}
+				<div class="lt-form__error" role="alert">{planError}</div>
+			{/if}
+
+			<div class="lt-form__actions">
+				<button type="button" onclick={onCancel}>Cancel</button>
+				<button type="submit" class="lt-form__primary" disabled={planning}>
+					Plan
+				</button>
+			</div>
+		</form>
+	{/if}
+</div>
 
 <style>
 	.lt-form {
@@ -281,6 +386,11 @@
 		flex-direction: column;
 		gap: 0.75rem;
 		min-width: min(420px, 90vw);
+	}
+	.lt-form__body {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
 	}
 	.lt-form__header {
 		display: flex;
@@ -293,6 +403,30 @@
 	.lt-form__title {
 		margin: 0;
 		font-size: 1.1rem;
+	}
+	.lt-tabs {
+		display: flex;
+		gap: 0.25rem;
+		border-bottom: 1px solid var(--background-modifier-border);
+	}
+	.lt-tabs__tab {
+		flex: 1;
+		background: transparent;
+		border: none;
+		border-bottom: 2px solid transparent;
+		padding: 0.4rem 0.5rem;
+		color: var(--text-muted);
+		cursor: pointer;
+		font-size: 0.95rem;
+	}
+	.lt-tabs__tab--active {
+		color: var(--text-normal);
+		border-bottom-color: var(--interactive-accent);
+	}
+	.lt-form__hint {
+		margin: 0;
+		font-size: 0.85rem;
+		color: var(--text-muted);
 	}
 	.lt-form__row {
 		display: flex;
@@ -312,6 +446,9 @@
 	}
 	.lt-form__label > span {
 		color: var(--text-muted);
+	}
+	.lt-form__label > span small {
+		opacity: 0.7;
 	}
 	.lt-form__label input,
 	.lt-form__label select,

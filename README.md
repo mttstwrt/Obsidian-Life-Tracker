@@ -1,6 +1,8 @@
 Obsidian Life Tracker — Planning & Scope
-A unified Obsidian plugin for tracking habits, maintenance tasks, reverse habits, projects, and counters. Built around the insight that all of these are queries over a single underlying event stream.
-Goals
+A Obsidian plugin for tracking habits, maintenance tasks, reverse habits, projects, and counters. Built around the idea that all of these are queries over a single underlying event stream.
+
+Motivation
+I tried lots of ways of tracking/planning my daily life but none really matched. So I figured why not build my own? This plugin is primarily built for myself and the way I feel is most natural to use it.
 
 Minimal friction when recording. Logging an event should take seconds on desktop and on mobile.
 Easy analysis. A unified dashboard answers "what should I do today?" and "how have I been doing?" without leaving Obsidian.
@@ -8,13 +10,6 @@ Less daily decision fatigue. Surface clear signals, but never decide for the use
 Data lives in the vault. Plain markdown, greppable, sync-friendly, portable.
 Cover tracking shapes that habit trackers ignore. Maintenance latency, reverse habits, project effort, open-ended counters.
 Recordable data is extensible without migration pain. Adding, removing, or retiring fields on a definition should not require touching existing data.
-
-Non-goals (for v1)
-
-Replacing Obsidian Tasks or full project management.
-Cross-vault sync — relies on whatever sync the user already has (Obsidian Sync, iCloud, Syncthing, etc.).
-Social features, sharing, public profiles.
-Replacing existing habit-streak plugins for users happy with them — interop is acceptable, replacement isn't required.
 
 
 Core concept: events and definitions
@@ -229,215 +224,6 @@ Date handling: date-fns
 ID generation: ULID (sortable, dedupe-friendly)
 
 
-Phase 1 — Skeleton plugin and data layer
-
- Bootstrap from obsidian-sample-plugin. Rename, update manifest.
- Add Svelte 5 + esbuild config. Verify a basic Svelte component can mount.
- Implement the vault adapter interface — a thin layer over Obsidian's Vault API for testability.
- Implement the data layer as a separate module:
-
- loadDefinitions() — parses frontmatter including fieldSchema.
- loadEvents(definitionId, dateRange?) — parses positional fields and the field block.
- loadAllEvents(dateRange?) — across all definitions, cache-driven.
- appendEvent(definitionId, event) — targeted edit, never rewrites the whole file.
- updateDefinition(def) — frontmatter only, preserves body and events.
- createDefinition(def).
- archiveDefinition(id) / unarchiveDefinition(id).
- retireField(definitionId, key) — marks retired: true in fieldSchema without touching event data.
- editEvent(definitionId, eventId, patch) — find by ID, rewrite line in place.
- deleteEvent(definitionId, eventId) — remove the line.
-
-
- In-memory cache keyed by definition ID, invalidated by file mtime.
- Field coercion layer. Produces FieldValue objects with raw, optional coerced, optional coercionError, optional rangeWarning. Never throws on bad data.
- Migration scaffolding. On load, check schemaVersion; run migrations in order if behind. Most field changes won't need this.
- Unit tests covering:
-
- All five field types coercing correctly
- All five field types failing coercion gracefully
- Range and option violations emitting rangeWarning but still coercing
- Unknown keys preserved verbatim
- Duplicate keys (last-wins + warning)
- Empty value vs. absent field distinction
- Round-trip determinism (write → read → write produces identical output)
-
-
-
-Done when: dev console can createDefinition() (with fieldSchema), appendEvent() five times with varying fields, loadEvents() to see them with correct types and any warnings, reload Obsidian, see the same data persisted with unknown keys preserved.
-
-Phase 2 — Logging modal
-The thing the user touches most often. Get this right before anything else.
-Quick-log command
-
- Register Obsidian command Life Tracker: Log event.
- Opens a modal with fuzzy search of all active definitions.
- Search matches displayName, tags, and emoji.
- Recent / frequently-used definitions float to the top.
-
-Value entry modal
-
- Date defaults to today, time defaults to now, both editable.
- Boolean kinds: single big "Log" button. Date/time hidden behind a "more" toggle on mobile.
- Count/duration kinds: numeric input, native numeric keyboard on mobile.
- Optional note field.
- fieldSchema drives extra inputs. For each non-retired field:
-
- number with range → slider or stepper
- number without range → numeric input
- enum → dropdown or segmented control
- boolean → toggle (writes "true" / "false")
- string → text input
- list → tag-style multi-select (or text input with comma separator)
- required: true → must be filled before submit
- prompt is the input label
-
-
- Inputs sanitize on submit: numbers serialized with String(n), booleans as exact strings, strings rejected if they contain forbidden characters (", newline) with a clear error message.
- If kind === "reverse-habit" and noteRequired, the note is required.
- If kind === "reverse-habit", show a confirmation step.
- On retroactive entries (date or time changed), set fields.enteredAt to now.
-
-Per-definition quick-log commands
-
- Each definition can opt into a registered command (e.g. Life Tracker: Log Running).
- Settings exposes a toggle per definition.
-
-Mobile considerations
-
- Big tap targets (44pt minimum).
- Single-column layout.
- Native date/time pickers.
- Test on iOS and Android Obsidian early.
-
-Done when: logging five different events takes under 10 seconds each, on both desktop and phone, including one retroactive entry and one event with custom fields filled.
-
-Phase 3 — Definition creation flow
-
- Register command Life Tracker: New definition.
- Also accessible from a "+" button in Settings and from empty states in dashboard views.
- Step 1: pick kind. Five large tappable cards.
- Step 2: kind-specific form. Common fields first, then kind-specific.
- Step 3: custom fields (optional, collapsible). Add rows of {key, type, options/range/itemType, prompt, required}.
- Validation:
-
- Name required
- No duplicate IDs (auto-slug with collision suffix)
- targetCadence parseable
- intervalDays positive
- Field keys match /^[a-z_][a-z0-9_]*$/
- No duplicate field keys within one definition
- enum requires options non-empty
- list requires itemType
- range requires min ≤ max
-
-
- Save: writes a new file in definitions/ with a slugified filename.
- Edit existing definition: same form, prefilled. Adding a field is non-destructive. Retiring a field hides it from new entries; old events keep their values. Removing a field entry from fieldSchema (vs. retiring) is allowed but warns: "Old events still contain this field; they'll display as raw strings without prompts."
-
-Done when: all five kinds can be created from the UI with custom fields, edited (including adding/retiring fields), and the resulting files match the expected format.
-
-Phase 4 — Dashboard view
-A custom Obsidian ItemView.
-Shell
-
- Top-level tabs: Today, Habits, Maintenance, Projects, Counters, Analytics, Settings.
- Tab state in a Svelte store.
- Mobile: collapse tabs into a swipeable nav or hamburger.
-
-Today view
-
- Habits due today — one-tap log buttons.
- Maintenance overdue or approaching — sorted by urgency, color-coded.
- Active projects with no recent activity — gentle surface, opt-in per-project.
- Reverse habits in milestone range — celebrate when crossing a milestone.
- Counters do not appear here by default. Opt-in per-counter.
-
-Habits view
-
- Grid of definitions × last N days. Click any cell to log (defaults to that date).
- Filter by tag.
- Mobile: vertical list with horizontal-scroll strip per habit.
-
-Maintenance view
-
- Sorted list by freshness urgency.
- Each row: emoji, name, last-done date, interval, freshness bar.
- Tap row to log "did it today" (one-tap path).
-
-Projects view
-
- List with status filter. Default: active only.
- Each row: name, last activity date, total events in last 30 days.
- Detail view: event timeline, effort-over-time chart, status toggle.
-
-Counters view
-
- List of counters with current value.
- Progress bar if goal is set.
- Period vs. all-time if resetCadence is yearly/monthly.
-
-Reverse habits
-No dedicated tab in v1. Appear in Today when crossing a milestone, and in Habits view with a clear visual distinction.
-Event detail / edit
-
- Tapping any event opens a detail panel showing all fields including custom ones.
- Fields render with their schema-defined formatting.
- Coercion errors and range warnings render inline with clear styling — a yellow icon and the raw value next to the schema's expectation.
- Unknown fields (no schema entry) appear in an "extra fields" section.
- Edit and delete actions available.
-
-Done when: all kinds visible in their respective views, one-tap logging works from each, custom fields display correctly, warnings surface clearly, data updates without manual refresh.
-
-Phase 5 — Visualizations
-
- Calendar heatmap component — reusable.
- Streak bar for habits.
- Freshness timeline for maintenance.
- Effort-over-time chart for projects.
- Time-since with milestone markers for reverse habits.
- Progress bars for counters.
- Field-aware visualizations. A definition with a numeric field (e.g. quality) can show that field's average over time, distribution, or correlation with the primary value. Drives off fieldSchema types. Skips events with coercionError.
-
-Analytics view
-
- Day-of-week analysis.
- Correlation hints between habits and between fields within a habit. Surface cautiously, not causally.
- Long-term trend — events per week over 6 months, per definition.
- Data quality view — surface events with coercion errors or range warnings, grouped by definition, so the user can find and fix bad data.
-
-Done when: every kind has at least one meaningful visualization, custom numeric fields surface in detail views, and Analytics handles edge cases (zero events, single-event definitions, fields with mixed types in old data).
-
-Phase 5.5 - Custom dashboards
-
- Arrange and display the data you want however you want it. A default dashboard exists with the current views.
-
-Phase 6 — External data adapters (optional for v1)
-
- Adapter interface: (dateRange) => Promise<Event[]> plus a target definitionId. Adapters can populate custom fields.
- First adapter: git commits. Cursor stored in config.json.
- Manual trigger in Settings.
- Pattern documented for future adapters.
-
-Realistically: v1 ships without this.
-
-Phase 7 — Polish
-
- Settings UI for everything in config.json.
- Theme integration: Obsidian CSS variables; no hardcoded colors.
- Empty states for every view.
- Error handling for malformed event lines (skip and warn, don't crash).
- Bulk actions: archive multiple definitions, export events to CSV (with all custom fields as columns).
- Use it daily for two weeks before showing anyone. Fix what hurts most.
-
-
-Suggested incremental release path
-
-v0.1 — Personal MVP: Phase 0 → 1 → 2 (core fields only, defer fieldSchema UI to v0.2 if time-constrained — but the parser must support it from day one) → just the Today view from Phase 4.
-v0.2 — Self-sufficient: Phase 3 + rest of Phase 4. Custom fields fully working in the UI.
-v0.3 — Insightful: Phase 5 visualizations including field-aware charts. Add date/time/datetime types if needed.
-v0.4+ — Power features: Phase 6 adapters, Phase 7 polish, possible community submission.
-
-
 Open questions / future considerations
 
 Reminders / notifications. Obsidian's notification API is weak, especially on mobile. Consider for v0.4+.
@@ -469,9 +255,9 @@ Retired field: A field marked retired: true — hidden from the logging UI but p
 Coercion: Converting a raw field string into a typed value per fieldSchema. Failures don't drop data; they surface warnings.
 Range warning: A field that coerced successfully but violates range or options. Not an error; surfaced as a soft warning.
 
-# Obsidian Plugin Template with Svelte and Tailwind CSS (UnoCSS)
+# Built from Obsidian Plugin Template with Svelte and Tailwind CSS (UnoCSS)
 
-This is a template repository for creating an Obsidian plugin using Svelte and
+This is built from a template repository for creating an Obsidian plugin using Svelte and
 Tailwind CSS (UnoCSS). It provides a basic setup and structure to kickstart your
 development process.
 
@@ -502,33 +288,27 @@ Before you get started, ensure that you have the following software installed:
 
 ## Getting Started
 
-To create a new plugin using this template, follow these steps:
-
-1. Click on the **"Use this template"** button at the top of the repository to
-   create a new repository based on this template.
-2. Clone the newly created repository to your local machine.
-3. Open a terminal and navigate to the cloned repository.
-4. Install the project dependencies by running the following command:
+1. Clone the repository to your local machine.
+2. Open a terminal and navigate to the cloned repository.
+3. Install the project dependencies by running the following command:
 
 ```bash
 bun install
 ```
 
-5. Start the development server with hot-reloading using the following command:
+4. Start the development server with hot-reloading using the following command:
 
 ```bash
 bun dev
 ```
 
-6. In **Obsidian**, open **Settings**.
-7. In the side menu, select **Community plugins**.
-8. Select **Turn on community plugins**.
-9. Under **Installed plugins**, enable the **Obsidian Svelte Plugin** by
+5. In **Obsidian**, open **Settings**.
+6. In the side menu, select **Community plugins**.
+7. Select **Turn on community plugins**.
+8. Under **Installed plugins**, enable the **Life Tracker** by
    selecting the toggle button next to it.
-10. Start **building** your plugin by modifying the example plugin located in
-    the src directory. You can also create new components and files as needed.
-11. Once you're ready to bundle your plugin for **production**, run the
-    following command:
+
+To build new changes use: 
 
 ```bash
 bun run build

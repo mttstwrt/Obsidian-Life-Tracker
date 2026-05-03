@@ -13,7 +13,7 @@ export class LifeTrackerSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Root folder")
 			.setDesc(
-				"Folder under your vault where definitions live. Definitions sit in <root>/definitions/.",
+				"Folder under your vault where definitions live. Definitions sit in <root>/definitions/. Created automatically if missing.",
 			)
 			.addText((t) =>
 				t
@@ -23,6 +23,23 @@ export class LifeTrackerSettingTab extends PluginSettingTab {
 						this.plugin.settings.rootFolder = v.trim() || "LifeTracker";
 						await this.plugin.saveSettings();
 						this.plugin.rebuildDataLayer();
+					}),
+			);
+
+		new Setting(containerEl).setName("Daily-note integration").setHeading();
+
+		new Setting(containerEl)
+			.setName("Plan heading")
+			.setDesc(
+				'Level-2 heading inside the daily note that planned lines are appended under. The Day Planner plugin reads any HH:mm lines below this heading. Default: "Timeline".',
+			)
+			.addText((t) =>
+				t
+					.setValue(this.plugin.settings.planHeading)
+					.setPlaceholder("Timeline")
+					.onChange(async (v) => {
+						this.plugin.settings.planHeading = v.trim() || "Timeline";
+						await this.plugin.saveSettings();
 					}),
 			);
 

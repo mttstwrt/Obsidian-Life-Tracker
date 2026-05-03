@@ -3,6 +3,7 @@ import { mount, unmount } from "svelte";
 import LogEventForm from "../components/LogEventForm.svelte";
 import type { DataLayer } from "../data/dataLayer";
 import type { LogFormSuccess } from "../data/logForm";
+import type { PlanFormSuccess } from "../data/planForm";
 import type { Definition, Event } from "../data/types";
 
 export interface LogEventModalOpts {
@@ -10,6 +11,7 @@ export interface LogEventModalOpts {
 	existingEvent?: Event;
 	initialDate?: string;
 	onLogged?: (definitionId: string) => void;
+	onPlan?: (planned: PlanFormSuccess) => Promise<void> | void;
 }
 
 export class LogEventModal extends Modal {
@@ -18,6 +20,7 @@ export class LogEventModal extends Modal {
 	private existingEvent?: Event;
 	private initialDate?: string;
 	private onLogged?: (definitionId: string) => void;
+	private onPlan?: (planned: PlanFormSuccess) => Promise<void> | void;
 
 	constructor(
 		app: App,
@@ -35,6 +38,7 @@ export class LogEventModal extends Modal {
 			this.existingEvent = opts.existingEvent;
 			this.initialDate = opts.initialDate;
 			this.onLogged = opts.onLogged;
+			this.onPlan = opts.onPlan;
 		}
 	}
 
@@ -52,6 +56,19 @@ export class LogEventModal extends Modal {
 				mode: this.mode,
 				existingEvent: this.existingEvent,
 				initialDate: this.initialDate,
+				onPlan: this.onPlan
+					? async (planned: PlanFormSuccess) => {
+							try {
+								await this.onPlan?.(planned);
+								this.close();
+							} catch (err) {
+								new Notice(
+									`Failed: ${(err as Error).message ?? String(err)}`,
+								);
+								throw err;
+							}
+						}
+					: undefined,
 				onSubmit: async (submitted: LogFormSuccess) => {
 					try {
 						if (this.mode === "edit" && this.existingEvent) {
