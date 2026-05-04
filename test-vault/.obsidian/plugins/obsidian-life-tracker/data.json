@@ -1,0 +1,25 @@
+{
+  "rootFolder": "LifeTracker",
+  "planHeading": "Timeline",
+  "recentDefinitionIds": [
+    "running",
+    "lifting",
+    "days-without-doomscrolling",
+    "books-2026",
+    "obsidian-plugin",
+    "wash-sheets"
+  ],
+  "quickLogIds": [],
+  "definitionOrder": {
+    "habits": [
+      "running",
+      "lifting",
+      "days-without-doomscrolling",
+      "test"
+    ],
+    "counters": [],
+    "maintenance": [],
+    "projects": []
+  },
+  "habitWindowMode": "calendar"
+}

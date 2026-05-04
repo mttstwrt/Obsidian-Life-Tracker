@@ -26,6 +26,23 @@ export class LifeTrackerSettingTab extends PluginSettingTab {
 					}),
 			);
 
+		new Setting(containerEl)
+			.setName("Rolling habit window")
+			.setDesc(
+				"When on, weekly/monthly habit progress counts events from the past 7 or 30 days (rolling) instead of the current calendar week/month. Daily habits are unaffected.",
+			)
+			.addToggle((t) =>
+				t
+					.setValue(this.plugin.settings.habitWindowMode === "rolling")
+					.onChange(async (rolling) => {
+						this.plugin.settings.habitWindowMode = rolling
+							? "rolling"
+							: "calendar";
+						await this.plugin.saveSettings();
+						this.plugin.refreshDashboards();
+					}),
+			);
+
 		new Setting(containerEl).setName("Daily-note integration").setHeading();
 
 		new Setting(containerEl)

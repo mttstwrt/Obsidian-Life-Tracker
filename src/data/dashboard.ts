@@ -11,6 +11,8 @@ import type {
 
 export type FreshnessStatus = "never" | "ok" | "approaching" | "overdue";
 
+export type HabitWindowMode = "calendar" | "rolling";
+
 export interface HabitSummary {
 	definition: HabitDefinition;
 	totalEvents: number;
@@ -18,7 +20,13 @@ export interface HabitSummary {
 	recentByDate: Map<string, number>;
 	periodCount: number;
 	periodTarget: number;
-	periodLabel: "today" | "this week" | "this month" | "—";
+	periodLabel:
+		| "today"
+		| "this week"
+		| "this month"
+		| "past 7 days"
+		| "past 30 days"
+		| "—";
 	dueToday: boolean;
 	currentStreak: number;
 }
@@ -123,6 +131,7 @@ export interface DashboardInput {
 	definitions: Definition[];
 	eventsByDefinitionId: Map<string, Event[]>;
 	now: Date;
+	habitWindowMode?: HabitWindowMode;
 }
 
 export interface DashboardSummaries {
@@ -145,7 +154,9 @@ export function summarizeAll(input: DashboardInput): DashboardSummaries {
 		const events = input.eventsByDefinitionId.get(def.id) ?? [];
 		switch (def.kind) {
 			case "habit":
-				habits.push(summarizeHabit(def, events, input.now));
+				habits.push(
+					summarizeHabit(def, events, input.now, input.habitWindowMode),
+				);
 				break;
 			case "maintenance":
 				maintenance.push(summarizeMaintenance(def, events, input.now));
@@ -168,6 +179,7 @@ export function summarizeHabit(
 	def: HabitDefinition,
 	events: Event[],
 	now: Date,
+	windowMode: HabitWindowMode = "calendar",
 ): HabitSummary {
 	const cadence = parseTargetCadence(def.targetCadence);
 	const today = startOfDay(now);
@@ -181,11 +193,23 @@ export function summarizeHabit(
 		periodStart = today;
 		periodLabel = "today";
 	} else if (cadence.period === "week") {
-		periodStart = startOfWeekMonday(now);
-		periodLabel = "this week";
+		if (windowMode === "rolling") {
+			periodStart = new Date(today);
+			periodStart.setDate(periodStart.getDate() - 6);
+			periodLabel = "past 7 days";
+		} else {
+			periodStart = startOfWeekMonday(now);
+			periodLabel = "this week";
+		}
 	} else {
-		periodStart = startOfMonth(now);
-		periodLabel = "this month";
+		if (windowMode === "rolling") {
+			periodStart = new Date(today);
+			periodStart.setDate(periodStart.getDate() - 29);
+			periodLabel = "past 30 days";
+		} else {
+			periodStart = startOfMonth(now);
+			periodLabel = "this month";
+		}
 	}
 	const periodStartIso = periodStart.toISOString();
 

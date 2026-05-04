@@ -11,9 +11,11 @@ const moment = obsidianMoment as unknown as MomentFactory;
 import {
 	DEFAULT_DAILY_NOTE_FORMAT,
 	type DailyNoteConfig,
+	type MarkPlanLineMatch,
 	dailyNotePath,
 	findOpenSlot,
 	insertUnderHeading,
+	markPlanLineCheckedForLabel,
 	parseDailyNotePath,
 	parsePlannedBlocks,
 } from "./dailyNote";
@@ -104,11 +106,60 @@ export async function findOpenSlotForDate(
 	});
 }
 
-function localDateString(d: Date): string {
+export function localDateString(d: Date): string {
 	const y = d.getFullYear();
 	const m = String(d.getMonth() + 1).padStart(2, "0");
 	const day = String(d.getDate()).padStart(2, "0");
 	return `${y}-${m}-${day}`;
+}
+
+export function localTimeString(d: Date): string {
+	const h = String(d.getHours()).padStart(2, "0");
+	const m = String(d.getMinutes()).padStart(2, "0");
+	return `${h}:${m}`;
+}
+
+export interface MarkPlanLineForEventOpts {
+	app: App;
+	vault: VaultAdapter;
+	date: string;
+	heading: string;
+	label: string;
+	time?: string;
+	/**
+	 * Called BEFORE the file is written, with the resolved daily-note path and the
+	 * matched line. Use this to register the plan key with any modify-watcher state
+	 * so the resulting file change isn't re-processed as a fresh check.
+	 */
+	beforeWrite?: (info: { path: string; matched: MarkPlanLineMatch }) => void;
+}
+
+/**
+ * Resolve the daily note for `date`; if it has an unchecked plan line whose label
+ * matches `label`, toggle it to checked. Returns the matched line and resolved path,
+ * or null if no daily note exists or no match is found.
+ */
+export async function markPlanLineForEvent(
+	opts: MarkPlanLineForEventOpts,
+): Promise<{ path: string; matched: MarkPlanLineMatch } | null> {
+	const config = resolveDailyNoteConfig(opts.app);
+	const path = dailyNotePath(opts.date, config, (date, format) =>
+		moment(date, "YYYY-MM-DD").format(format),
+	);
+	if (!(await opts.vault.exists(path))) return null;
+
+	const content = await opts.vault.read(path);
+	const result = markPlanLineCheckedForLabel(
+		content,
+		opts.heading,
+		opts.label,
+		opts.time,
+	);
+	if (!result.matched || result.updated === content) return null;
+
+	opts.beforeWrite?.({ path, matched: result.matched });
+	await opts.vault.write(path, result.updated);
+	return { path, matched: result.matched };
 }
 
 /**

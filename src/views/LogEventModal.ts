@@ -10,7 +10,7 @@ export interface LogEventModalOpts {
 	mode?: "create" | "edit";
 	existingEvent?: Event;
 	initialDate?: string;
-	onLogged?: (definitionId: string) => void;
+	onLogged?: (definitionId: string, event: Event) => void | Promise<void>;
 	onPlan?: (planned: PlanFormSuccess) => Promise<void> | void;
 	findSlot?: (date: string, durationMin: number) => Promise<string | null>;
 }
@@ -20,7 +20,7 @@ export class LogEventModal extends Modal {
 	private mode: "create" | "edit";
 	private existingEvent?: Event;
 	private initialDate?: string;
-	private onLogged?: (definitionId: string) => void;
+	private onLogged?: (definitionId: string, event: Event) => void | Promise<void>;
 	private onPlan?: (planned: PlanFormSuccess) => Promise<void> | void;
 	private findSlot?: (
 		date: string,
@@ -31,21 +31,15 @@ export class LogEventModal extends Modal {
 		app: App,
 		private data: DataLayer,
 		private definition: Definition,
-		opts: LogEventModalOpts | ((definitionId: string) => void) = {},
+		opts: LogEventModalOpts = {},
 	) {
 		super(app);
-		// Backwards-compatible: previous signature took an onLogged callback as 4th arg.
-		if (typeof opts === "function") {
-			this.mode = "create";
-			this.onLogged = opts;
-		} else {
-			this.mode = opts.mode ?? "create";
-			this.existingEvent = opts.existingEvent;
-			this.initialDate = opts.initialDate;
-			this.onLogged = opts.onLogged;
-			this.onPlan = opts.onPlan;
-			this.findSlot = opts.findSlot;
-		}
+		this.mode = opts.mode ?? "create";
+		this.existingEvent = opts.existingEvent;
+		this.initialDate = opts.initialDate;
+		this.onLogged = opts.onLogged;
+		this.onPlan = opts.onPlan;
+		this.findSlot = opts.findSlot;
 	}
 
 	onOpen(): void {
@@ -78,8 +72,9 @@ export class LogEventModal extends Modal {
 					: undefined,
 				onSubmit: async (submitted: LogFormSuccess) => {
 					try {
+						let logged: Event;
 						if (this.mode === "edit" && this.existingEvent) {
-							await this.data.editEvent(
+							logged = await this.data.editEvent(
 								this.definition.id,
 								this.existingEvent.id,
 								{
@@ -91,7 +86,7 @@ export class LogEventModal extends Modal {
 							);
 							new Notice(`Updated ${this.definition.displayName}`);
 						} else {
-							await this.data.appendEvent(this.definition.id, {
+							logged = await this.data.appendEvent(this.definition.id, {
 								id: "",
 								timestamp: submitted.event.timestamp,
 								value: submitted.event.value,
@@ -100,7 +95,7 @@ export class LogEventModal extends Modal {
 							});
 							new Notice(`Logged ${this.definition.displayName}`);
 						}
-						this.onLogged?.(this.definition.id);
+						await this.onLogged?.(this.definition.id, logged);
 						this.close();
 					} catch (err) {
 						new Notice(

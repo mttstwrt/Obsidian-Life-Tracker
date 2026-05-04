@@ -4,6 +4,9 @@ import { parseCheckedPlanLines } from "./data/dailyNote";
 import {
 	addPlanLineToDailyNote,
 	findOpenSlotForDate,
+	localDateString,
+	localTimeString,
+	markPlanLineForEvent,
 	parseDailyNoteDateForApp,
 	resolveDailyNoteConfig,
 } from "./data/dailyNoteService";
@@ -32,6 +35,7 @@ interface LifeTrackerSettings {
 	recentDefinitionIds: string[];
 	quickLogIds: string[];
 	definitionOrder: Record<OrderTabKey, string[]>;
+	habitWindowMode: "calendar" | "rolling";
 }
 
 const DEFAULT_SETTINGS: LifeTrackerSettings = {
@@ -40,6 +44,7 @@ const DEFAULT_SETTINGS: LifeTrackerSettings = {
 	recentDefinitionIds: [],
 	quickLogIds: [],
 	definitionOrder: { habits: [], counters: [], maintenance: [], projects: [] },
+	habitWindowMode: "calendar",
 };
 
 const RECENT_LIMIT = 20;
@@ -72,7 +77,7 @@ export default class LifeTrackerPlugin extends Plugin {
 		this.refreshDashboards();
 	}
 
-	private refreshDashboards(): void {
+	refreshDashboards(): void {
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_DASHBOARD)) {
 			const view = leaf.view as DashboardView;
 			view.refresh?.();
@@ -224,7 +229,7 @@ export default class LifeTrackerPlugin extends Plugin {
 			this.settings.recentDefinitionIds,
 			(def) => {
 				new LogEventModal(this.app, this.data, def, {
-					onLogged: (id) => this.recordRecent(id),
+					onLogged: (id, ev) => this.afterEventLogged(id, ev),
 					onPlan: (planned) => this.handlePlan(def, planned),
 					findSlot: (date, durationMin) =>
 						this.findOpenSlot(date, durationMin),
@@ -246,7 +251,7 @@ export default class LifeTrackerPlugin extends Plugin {
 		}
 		new LogEventModal(this.app, this.data, def, {
 			initialDate: opts.initialDate,
-			onLogged: (id) => this.recordRecent(id),
+			onLogged: (id, ev) => this.afterEventLogged(id, ev),
 			onPlan: (planned) => this.handlePlan(def, planned),
 			findSlot: (date, durationMin) =>
 				this.findOpenSlot(date, durationMin),
@@ -301,13 +306,13 @@ export default class LifeTrackerPlugin extends Plugin {
 			return this.openLogModal(definitionId);
 		}
 		try {
-			await this.data.appendEvent(definitionId, {
+			const logged = await this.data.appendEvent(definitionId, {
 				id: "",
 				timestamp: new Date().toISOString(),
 				value: 1,
 				fields: {},
 			});
-			await this.recordRecent(definitionId);
+			await this.afterEventLogged(definitionId, logged);
 			new Notice(`Logged ${def.displayName}`);
 		} catch (err) {
 			new Notice(`Failed: ${(err as Error).message ?? String(err)}`);
@@ -464,6 +469,46 @@ export default class LifeTrackerPlugin extends Plugin {
 		}
 		if (skipped.length > 0) {
 			console.info("[life-tracker] auto-log skipped:", skipped.join("; "));
+		}
+	}
+
+	private async afterEventLogged(
+		definitionId: string,
+		event: Event,
+	): Promise<void> {
+		await this.recordRecent(definitionId);
+		const def = await this.data.getDefinition(definitionId);
+		if (def) {
+			await this.syncEventToDailyNote(def, event);
+		}
+	}
+
+	private async syncEventToDailyNote(
+		def: Definition,
+		event: Event,
+	): Promise<void> {
+		const ts = new Date(event.timestamp);
+		if (Number.isNaN(ts.getTime())) return;
+		const date = localDateString(ts);
+		const time = localTimeString(ts);
+		try {
+			await markPlanLineForEvent({
+				app: this.app,
+				vault: this.vaultAdapter,
+				date,
+				heading: this.settings.planHeading,
+				label: def.displayName,
+				time,
+				beforeWrite: ({ path, matched }) => {
+					// Pre-register the plan key so the modify watcher doesn't
+					// re-process this checkbox toggle as a fresh check.
+					this.processedPlanKeys.add(
+						planKey(path, matched.startTime, matched.label),
+					);
+				},
+			});
+		} catch (err) {
+			console.warn("[life-tracker] sync event → checkbox failed:", err);
 		}
 	}
 

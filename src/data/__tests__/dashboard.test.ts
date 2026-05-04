@@ -190,6 +190,48 @@ describe("summarizeHabit", () => {
 		expect(summary.currentStreak).toBe(3);
 	});
 
+	test("rolling weekly window counts past 7 days", () => {
+		// Today is Mon May 4, 2026; calendar week just started (no events yet this week)
+		const now = new Date(2026, 4, 4, 12);
+		const events = [
+			ev(new Date(2026, 3, 29, 8).toISOString()), // last Wed
+			ev(new Date(2026, 4, 2, 8).toISOString()), // last Sat
+		];
+		const calendar = summarizeHabit(HABIT, events, now, "calendar");
+		expect(calendar.periodCount).toBe(0);
+		expect(calendar.periodLabel).toBe("this week");
+
+		const rolling = summarizeHabit(HABIT, events, now, "rolling");
+		expect(rolling.periodCount).toBe(2);
+		expect(rolling.periodTarget).toBe(4);
+		expect(rolling.periodLabel).toBe("past 7 days");
+	});
+
+	test("rolling weekly drops events beyond 7-day window", () => {
+		// Today is Wed May 6, 2026 — a week after the prior Wed run
+		const now = new Date(2026, 4, 6, 12);
+		const events = [
+			ev(new Date(2026, 3, 29, 8).toISOString()), // 8 cal days ago, out of window
+			ev(new Date(2026, 4, 2, 8).toISOString()), // 4 days ago, in window
+		];
+		const rolling = summarizeHabit(HABIT, events, now, "rolling");
+		expect(rolling.periodCount).toBe(1);
+		expect(rolling.periodLabel).toBe("past 7 days");
+	});
+
+	test("rolling monthly window counts past 30 days", () => {
+		const monthly: HabitDefinition = { ...HABIT, targetCadence: "10/month" };
+		const now = new Date(2026, 4, 4, 12);
+		const events = [
+			ev(new Date(2026, 3, 6, 8).toISOString()), // 28 days ago, in window
+			ev(new Date(2026, 3, 5, 8).toISOString()), // 29 days ago, on edge (in window)
+			ev(new Date(2026, 3, 4, 8).toISOString()), // 30 days ago, out of window
+		];
+		const rolling = summarizeHabit(monthly, events, now, "rolling");
+		expect(rolling.periodCount).toBe(2);
+		expect(rolling.periodLabel).toBe("past 30 days");
+	});
+
 	test("unparseable cadence yields target=0", () => {
 		const def: HabitDefinition = { ...HABIT, targetCadence: "garbage" };
 		const summary = summarizeHabit(def, [], new Date(2026, 4, 1, 12));

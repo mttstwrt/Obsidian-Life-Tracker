@@ -54,6 +54,7 @@
 			definitions,
 			eventsByDefinitionId: eventsByDefinition,
 			now,
+			habitWindowMode: plugin.settings.habitWindowMode,
 		}),
 	);
 

@@ -271,6 +271,96 @@ export function parseCheckedPlanLines(
 	return out;
 }
 
+const UNCHECKED_PLAN_LINE_RE = new RegExp(
+	`^\\s*-\\s*\\[ \\]\\s*${TIME_RE_SOURCE}(?:\\s*-\\s*${TIME_RE_SOURCE})?\\s+(.*)$`,
+);
+
+export interface MarkPlanLineMatch {
+	startTime: string;
+	endTime?: string;
+	label: string;
+	raw: string;
+}
+
+export interface MarkPlanLineResult {
+	updated: string;
+	matched: MarkPlanLineMatch | null;
+}
+
+/**
+ * Find the first unchecked plan line under `heading` whose label (after stripping
+ * the time prefix, optional `Project:` prefix, and trailing tags) matches `label`
+ * case-insensitively, and toggle `[ ]` → `[x]`.
+ *
+ * If `preferredTime` (HH:MM) is provided, prefers a candidate whose start time
+ * matches exactly; otherwise picks the first match in document order. Multiple
+ * planned lines for the same label work (each event consumes one).
+ */
+export function markPlanLineCheckedForLabel(
+	content: string,
+	heading: string,
+	label: string,
+	preferredTime?: string,
+): MarkPlanLineResult {
+	const target = label.trim().toLowerCase();
+	if (target === "") return { updated: content, matched: null };
+
+	const headingPattern = new RegExp(
+		`^##\\s+${escapeRegex(heading)}\\s*$`,
+		"m",
+	);
+	const head = content.match(headingPattern);
+	if (!head || head.index === undefined) {
+		return { updated: content, matched: null };
+	}
+
+	const sectionStart = head.index + head[0].length;
+	const remainder = content.slice(sectionStart);
+	const lines = remainder.split("\n");
+
+	type Candidate = {
+		index: number;
+		startTime: string;
+		endTime?: string;
+		lineLabel: string;
+		raw: string;
+	};
+	const candidates: Candidate[] = [];
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		if (i > 0 && HEADING_PREFIX_RE.test(line)) break;
+		const m = UNCHECKED_PLAN_LINE_RE.exec(line);
+		if (!m) continue;
+		const startTime = `${m[1]}:${m[2]}`;
+		const endTime = m[3] !== undefined ? `${m[3]}:${m[4]}` : undefined;
+		const lineLabel = extractPlanLabel(m[5] ?? "");
+		if (lineLabel.toLowerCase() === target) {
+			candidates.push({ index: i, startTime, endTime, lineLabel, raw: line });
+		}
+	}
+
+	if (candidates.length === 0) return { updated: content, matched: null };
+
+	const chosen =
+		(preferredTime && candidates.find((c) => c.startTime === preferredTime)) ||
+		candidates[0];
+
+	const newLine = chosen.raw.replace(/^(\s*-\s*)\[ \]/, "$1[x]");
+	lines[chosen.index] = newLine;
+	const updated = content.slice(0, sectionStart) + lines.join("\n");
+
+	return {
+		updated,
+		matched: {
+			startTime: chosen.startTime,
+			endTime: chosen.endTime,
+			label: chosen.lineLabel,
+			raw: newLine,
+		},
+	};
+}
+
 export interface DailyNoteConfig {
 	folder: string;
 	format: string;

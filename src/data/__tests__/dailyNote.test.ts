@@ -5,6 +5,7 @@ import {
 	findOpenSlot,
 	formatPlanLine,
 	insertUnderHeading,
+	markPlanLineCheckedForLabel,
 	parseCheckedPlanLines,
 	parseDailyNotePath,
 	parsePlannedBlocks,
@@ -542,5 +543,118 @@ describe("parseCheckedPlanLines", () => {
 	test("skips lines with empty labels", () => {
 		const content = ["## Timeline", "- [x] 09:00   "].join("\n");
 		expect(parseCheckedPlanLines(content, "Timeline")).toEqual([]);
+	});
+});
+
+describe("markPlanLineCheckedForLabel", () => {
+	test("checks a single-time line whose label matches (case-insensitive)", () => {
+		const content = ["## Timeline", "", "- [ ] 07:00 Run #habit", ""].join(
+			"\n",
+		);
+		const result = markPlanLineCheckedForLabel(content, "Timeline", "run");
+		expect(result.matched?.startTime).toBe("07:00");
+		expect(result.matched?.label).toBe("Run");
+		expect(result.updated).toContain("- [x] 07:00 Run #habit");
+	});
+
+	test("checks a line with a duration time block", () => {
+		const content = [
+			"## Timeline",
+			"- [ ] 13:30 - 14:00 Pull-ups #habit",
+		].join("\n");
+		const result = markPlanLineCheckedForLabel(content, "Timeline", "Pull-ups");
+		expect(result.matched?.startTime).toBe("13:30");
+		expect(result.matched?.endTime).toBe("14:00");
+		expect(result.updated).toContain("- [x] 13:30 - 14:00 Pull-ups #habit");
+	});
+
+	test("matches Project: prefix", () => {
+		const content = [
+			"## Timeline",
+			"- [ ] 19:00 - 20:30 Project: Plan tab #work",
+		].join("\n");
+		const result = markPlanLineCheckedForLabel(
+			content,
+			"Timeline",
+			"Plan tab",
+		);
+		expect(result.matched?.label).toBe("Plan tab");
+		expect(result.updated).toContain(
+			"- [x] 19:00 - 20:30 Project: Plan tab #work",
+		);
+	});
+
+	test("prefers a line whose start time matches when multiple unchecked lines share a label", () => {
+		const content = [
+			"## Timeline",
+			"- [ ] 07:00 Run #habit",
+			"- [ ] 17:00 Run #habit",
+		].join("\n");
+		const result = markPlanLineCheckedForLabel(
+			content,
+			"Timeline",
+			"Run",
+			"17:00",
+		);
+		expect(result.matched?.startTime).toBe("17:00");
+		expect(result.updated).toContain("- [ ] 07:00 Run #habit");
+		expect(result.updated).toContain("- [x] 17:00 Run #habit");
+	});
+
+	test("falls back to first unchecked match when preferred time has none", () => {
+		const content = [
+			"## Timeline",
+			"- [ ] 07:00 Run #habit",
+			"- [ ] 17:00 Run #habit",
+		].join("\n");
+		const result = markPlanLineCheckedForLabel(
+			content,
+			"Timeline",
+			"Run",
+			"12:30",
+		);
+		expect(result.matched?.startTime).toBe("07:00");
+		expect(result.updated).toContain("- [x] 07:00 Run #habit");
+		expect(result.updated).toContain("- [ ] 17:00 Run #habit");
+	});
+
+	test("ignores already-checked lines", () => {
+		const content = [
+			"## Timeline",
+			"- [x] 07:00 Run #habit",
+			"- [ ] 17:00 Run #habit",
+		].join("\n");
+		const result = markPlanLineCheckedForLabel(content, "Timeline", "Run");
+		expect(result.matched?.startTime).toBe("17:00");
+	});
+
+	test("returns null match when nothing fits", () => {
+		const content = ["## Timeline", "- [ ] 07:00 Run #habit"].join("\n");
+		const result = markPlanLineCheckedForLabel(
+			content,
+			"Timeline",
+			"Lunch",
+		);
+		expect(result.matched).toBeNull();
+		expect(result.updated).toBe(content);
+	});
+
+	test("doesn't cross into the next heading", () => {
+		const content = [
+			"## Timeline",
+			"- [ ] 07:00 Run #habit",
+			"## Notes",
+			"- [ ] 08:00 Run #habit",
+		].join("\n");
+		const result = markPlanLineCheckedForLabel(
+			content,
+			"Timeline",
+			"Run",
+			"08:00",
+		);
+		// Falls back to the only candidate under Timeline (07:00); the 08:00 under
+		// Notes must not be touched.
+		expect(result.matched?.startTime).toBe("07:00");
+		expect(result.updated).toContain("## Notes\n- [ ] 08:00 Run #habit");
 	});
 });

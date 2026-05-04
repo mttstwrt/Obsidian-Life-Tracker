@@ -1,0 +1,53 @@
+# Goal: add integration with the daily notes and day planner plugins
+
+## Phase 1 (basic function):
+
+add a tab to the log event page with a menu for adding it into a todo section on the daily note, with optional time format like below so that it can be read by the day planner plugin.
+
+12:30 - 13:00 Soup dumplings for lunch
+
+17:30 - 18:00 finalize grocery list
+
+13:30 - 14:00 Pull-ups
+
+18:00 - 19:00 Grocery shopping
+
+19:00 - 19:30 Chipotle for dinner
+
+13:00 - 13:30 Learn some japanese
+
+19:30 - 21:00 Do a sketch
+
+21:00 - 22:00 Watch show
+
+22:00 - 23:00 Do a thing
+
+## Phase 2 (optional default time span):
+
+add a defaultDuration field to the "New Definition" modal
+
+The Logic: When you click "Plan" on Japanese, it could default to a 30-minute block. When you click Art, it might default to 90 minutes. All defined in the event definition.
+
+## Phase 3 Time-Block Suggestions (Slot Finding):
+
+Parse already planned activities and suggest an open time slot. That can fit the duration, updates if the duration is changed in the plan UI.
+
+## Phase 4 Bidirectional sync:
+
+automate the "Log" action based on the Day Planner.
+
+The Logic: If you check off a task in your Daily Note that matches a habit name (e.g., - [x] 19:30 - 21:00 Run), the tracker should automatically "Log" that habit for the day.
+
+
+## NOTE:
+
+To ensure the Day Planner plugin picks it up perfectly, the "Plan" function should append to a specific ## Timeline or ## Schedule heading in the daily note (configurable in the plugin settings) using this structure:
+
+Habit TypeSuggested FormatLogic
+Active HabitHH:mm - HH:mm Habit Name #habit
+Maintenance- [ ] HH:mm Maintenance Task #maint
+ProjectHH:mm - HH:mm Project: Task Name #work
+
+## NOTE 2:
+
+Currently the folder that stores event definitions has to be manually created and cannot be changed. In the plugin settings I would like to be able to select a folder for event definitions, and have a default folder be created if none is selected and it doesn't exist.
