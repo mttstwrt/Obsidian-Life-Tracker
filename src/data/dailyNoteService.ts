@@ -2,7 +2,11 @@ import { type App, moment as obsidianMoment } from "obsidian";
 
 // Obsidian re-exports moment as `typeof Moment` (the namespace), which TS doesn't see as callable
 // even though it is at runtime. Cast to the callable function form.
-type MomentFactory = (input: string, format: string) => { format(f: string): string };
+type MomentFactory = (
+	input: string,
+	format: string,
+	strict?: boolean,
+) => { format(f: string): string; isValid(): boolean };
 const moment = obsidianMoment as unknown as MomentFactory;
 import {
 	DEFAULT_DAILY_NOTE_FORMAT,
@@ -10,6 +14,7 @@ import {
 	dailyNotePath,
 	findOpenSlot,
 	insertUnderHeading,
+	parseDailyNotePath,
 	parsePlannedBlocks,
 } from "./dailyNote";
 import type { VaultAdapter } from "./vaultAdapter";
@@ -104,4 +109,20 @@ function localDateString(d: Date): string {
 	const m = String(d.getMonth() + 1).padStart(2, "0");
 	const day = String(d.getDate()).padStart(2, "0");
 	return `${y}-${m}-${day}`;
+}
+
+/**
+ * Resolve `path` to a daily-note date (`YYYY-MM-DD`) or null. Uses moment in strict
+ * mode so an off-format file in the daily-notes folder doesn't accidentally trigger
+ * sync. The pure parsing logic lives in `dailyNote.ts`; this just supplies moment.
+ */
+export function parseDailyNoteDateForApp(
+	path: string,
+	config: DailyNoteConfig,
+): string | null {
+	return parseDailyNotePath(path, config, (basename, format) => {
+		const parsed = moment(basename, format, true);
+		if (!parsed.isValid()) return null;
+		return parsed.format("YYYY-MM-DD");
+	});
 }

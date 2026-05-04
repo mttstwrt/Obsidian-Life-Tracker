@@ -211,6 +211,66 @@ export function parseTimeToMinutes(time: string): number | null {
 	return h * 60 + mm;
 }
 
+export interface CheckedPlanLine {
+	startTime: string;
+	endTime?: string;
+	label: string;
+	raw: string;
+}
+
+const CHECKED_PLAN_LINE_RE = new RegExp(
+	`^\\s*-\\s*\\[[xX]\\]\\s*${TIME_RE_SOURCE}(?:\\s*-\\s*${TIME_RE_SOURCE})?\\s+(.*)$`,
+);
+
+const PROJECT_PREFIX_RE = /^Project:\s+/i;
+const TRAILING_TAGS_RE = /(?:\s+#[A-Za-z0-9_\-/]+)+\s*$/;
+
+export function extractPlanLabel(text: string): string {
+	let s = text.trim();
+	s = s.replace(TRAILING_TAGS_RE, "");
+	s = s.replace(PROJECT_PREFIX_RE, "");
+	return s.trim();
+}
+
+export function parseCheckedPlanLines(
+	content: string,
+	heading: string,
+): CheckedPlanLine[] {
+	const headingPattern = new RegExp(
+		`^##\\s+${escapeRegex(heading)}\\s*$`,
+		"m",
+	);
+	const match = content.match(headingPattern);
+	if (!match || match.index === undefined) return [];
+
+	const sectionStart = match.index + match[0].length;
+	const lines = content.slice(sectionStart).split("\n");
+	const out: CheckedPlanLine[] = [];
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		if (i > 0 && HEADING_PREFIX_RE.test(line)) break;
+		const m = CHECKED_PLAN_LINE_RE.exec(line);
+		if (!m) continue;
+		const startMin = Number(m[1]) * 60 + Number(m[2]);
+		if (!Number.isFinite(startMin) || startMin < 0 || startMin >= 24 * 60) {
+			continue;
+		}
+		const startTime = `${m[1]}:${m[2]}`;
+		let endTime: string | undefined;
+		if (m[3] !== undefined) {
+			const endMin = Number(m[3]) * 60 + Number(m[4]);
+			if (!Number.isFinite(endMin) || endMin < 0 || endMin >= 24 * 60) {
+				continue;
+			}
+			endTime = `${m[3]}:${m[4]}`;
+		}
+		const label = extractPlanLabel(m[5] ?? "");
+		if (label === "") continue;
+		out.push({ startTime, endTime, label, raw: line });
+	}
+	return out;
+}
+
 export interface DailyNoteConfig {
 	folder: string;
 	format: string;
@@ -228,4 +288,34 @@ export function dailyNotePath(
 	const filename = formatDate(date, config.format);
 	const folder = config.folder.replace(/^\/+|\/+$/g, "");
 	return folder ? `${folder}/${filename}.md` : `${filename}.md`;
+}
+
+/**
+ * Inverse of `dailyNotePath`: given a vault path and the daily-note config,
+ * return the `YYYY-MM-DD` date the file represents, or null if it isn't a
+ * daily-note file (wrong folder, wrong format, nested deeper, etc.).
+ *
+ * `parseBasename` should parse the basename (no `.md`) against `format` and
+ * return `YYYY-MM-DD` or null. Strict matching is the caller's responsibility.
+ */
+export type ParseBasename = (basename: string, format: string) => string | null;
+
+export function parseDailyNotePath(
+	path: string,
+	config: DailyNoteConfig,
+	parseBasename: ParseBasename,
+): string | null {
+	if (!path.endsWith(".md")) return null;
+	const folder = config.folder.replace(/^\/+|\/+$/g, "");
+	let rel: string;
+	if (folder) {
+		const prefix = `${folder}/`;
+		if (!path.startsWith(prefix)) return null;
+		rel = path.slice(prefix.length);
+	} else {
+		rel = path;
+	}
+	const basename = rel.slice(0, -3);
+	if (basename === "") return null;
+	return parseBasename(basename, config.format);
 }

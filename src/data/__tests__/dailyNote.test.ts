@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
 	dailyNotePath,
+	extractPlanLabel,
 	findOpenSlot,
 	formatPlanLine,
 	insertUnderHeading,
+	parseCheckedPlanLines,
+	parseDailyNotePath,
 	parsePlannedBlocks,
 } from "../dailyNote";
 
@@ -388,5 +391,156 @@ describe("findOpenSlot", () => {
 				notBeforeMin: 23 * 60,
 			}),
 		).toBeNull();
+	});
+});
+
+describe("extractPlanLabel", () => {
+	test("strips trailing tags", () => {
+		expect(extractPlanLabel("Run #habit #cardio")).toBe("Run");
+	});
+
+	test("strips Project: prefix", () => {
+		expect(extractPlanLabel("Project: Wire UI #work")).toBe("Wire UI");
+	});
+
+	test("preserves embedded #-like text that is not a trailing tag run", () => {
+		expect(extractPlanLabel("Read C# book #habit")).toBe("Read C# book");
+	});
+
+	test("returns empty when nothing remains", () => {
+		expect(extractPlanLabel("   ")).toBe("");
+	});
+});
+
+describe("parseDailyNotePath", () => {
+	const yyyymmdd = (basename: string, format: string) =>
+		format === "YYYY-MM-DD" && /^\d{4}-\d{2}-\d{2}$/.test(basename)
+			? basename
+			: null;
+
+	test("matches root-level daily note when no folder configured", () => {
+		expect(
+			parseDailyNotePath(
+				"2026-05-03.md",
+				{ folder: "", format: "YYYY-MM-DD" },
+				yyyymmdd,
+			),
+		).toBe("2026-05-03");
+	});
+
+	test("matches files inside the configured folder", () => {
+		expect(
+			parseDailyNotePath(
+				"Daily/2026-05-03.md",
+				{ folder: "Daily", format: "YYYY-MM-DD" },
+				yyyymmdd,
+			),
+		).toBe("2026-05-03");
+	});
+
+	test("rejects files outside the folder", () => {
+		expect(
+			parseDailyNotePath(
+				"Notes/2026-05-03.md",
+				{ folder: "Daily", format: "YYYY-MM-DD" },
+				yyyymmdd,
+			),
+		).toBeNull();
+	});
+
+	test("rejects non-md files", () => {
+		expect(
+			parseDailyNotePath(
+				"Daily/2026-05-03.txt",
+				{ folder: "Daily", format: "YYYY-MM-DD" },
+				yyyymmdd,
+			),
+		).toBeNull();
+	});
+
+	test("returns null when basename does not match format", () => {
+		expect(
+			parseDailyNotePath(
+				"Daily/notes.md",
+				{ folder: "Daily", format: "YYYY-MM-DD" },
+				yyyymmdd,
+			),
+		).toBeNull();
+	});
+
+	test("strips slashes around the configured folder", () => {
+		expect(
+			parseDailyNotePath(
+				"Daily/2026-05-03.md",
+				{ folder: "/Daily/", format: "YYYY-MM-DD" },
+				yyyymmdd,
+			),
+		).toBe("2026-05-03");
+	});
+});
+
+describe("parseCheckedPlanLines", () => {
+	test("returns [] when heading missing", () => {
+		expect(parseCheckedPlanLines("# Day\n", "Timeline")).toEqual([]);
+	});
+
+	test("only returns checked lines under the configured heading", () => {
+		const content = [
+			"## Timeline",
+			"",
+			"- [ ] 09:00 - 10:00 Run #habit",
+			"- [x] 12:30 - 13:00 Lunch #habit",
+			"- [X] 14:00 Wash sheets #maint",
+			"",
+			"## Notes",
+			"- [x] 15:00 - 16:00 not counted",
+		].join("\n");
+		expect(parseCheckedPlanLines(content, "Timeline")).toEqual([
+			{
+				startTime: "12:30",
+				endTime: "13:00",
+				label: "Lunch",
+				raw: "- [x] 12:30 - 13:00 Lunch #habit",
+			},
+			{
+				startTime: "14:00",
+				endTime: undefined,
+				label: "Wash sheets",
+				raw: "- [X] 14:00 Wash sheets #maint",
+			},
+		]);
+	});
+
+	test("strips Project: prefix and trailing tags from label", () => {
+		const content = [
+			"## Timeline",
+			"",
+			"- [x] 19:00 - 20:30 Project: Plan tab #work #lifecore",
+		].join("\n");
+		expect(parseCheckedPlanLines(content, "Timeline")).toEqual([
+			{
+				startTime: "19:00",
+				endTime: "20:30",
+				label: "Plan tab",
+				raw: "- [x] 19:00 - 20:30 Project: Plan tab #work #lifecore",
+			},
+		]);
+	});
+
+	test("stops at next heading", () => {
+		const content = [
+			"## Timeline",
+			"- [x] 09:00 - 10:00 a",
+			"## Other",
+			"- [x] 11:00 b",
+		].join("\n");
+		const out = parseCheckedPlanLines(content, "Timeline");
+		expect(out).toHaveLength(1);
+		expect(out[0].label).toBe("a");
+	});
+
+	test("skips lines with empty labels", () => {
+		const content = ["## Timeline", "- [x] 09:00   "].join("\n");
+		expect(parseCheckedPlanLines(content, "Timeline")).toEqual([]);
 	});
 });

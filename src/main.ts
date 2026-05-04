@@ -1,10 +1,18 @@
-import { Notice, Plugin, type WorkspaceLeaf } from "obsidian";
+import { Notice, Plugin, TFile, type WorkspaceLeaf } from "obsidian";
 import { DataLayer } from "./data/dataLayer";
+import { parseCheckedPlanLines } from "./data/dailyNote";
 import {
 	addPlanLineToDailyNote,
 	findOpenSlotForDate,
+	parseDailyNoteDateForApp,
+	resolveDailyNoteConfig,
 } from "./data/dailyNoteService";
 import type { PlanFormSuccess } from "./data/planForm";
+import {
+	autoEventToEventInput,
+	buildAutoEvent,
+	matchDefinitionByLabel,
+} from "./data/planSync";
 import { ObsidianVaultAdapter, type VaultAdapter } from "./data/vaultAdapter";
 import type { Definition, Event } from "./data/types";
 import { DashboardView, VIEW_TYPE_DASHBOARD } from "./views/DashboardView";
@@ -36,10 +44,15 @@ const DEFAULT_SETTINGS: LifeTrackerSettings = {
 
 const RECENT_LIMIT = 20;
 
+function planKey(path: string, startTime: string, label: string): string {
+	return `${path}::${startTime}::${label.toLowerCase()}`;
+}
+
 export default class LifeTrackerPlugin extends Plugin {
 	settings!: LifeTrackerSettings;
 	data!: DataLayer;
 	private vaultAdapter!: VaultAdapter;
+	private processedPlanKeys = new Set<string>();
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -157,6 +170,18 @@ export default class LifeTrackerPlugin extends Plugin {
 		await this.registerQuickLogCommands();
 
 		this.addSettingTab(new LifeTrackerSettingTab(this.app, this));
+
+		this.registerEvent(
+			this.app.vault.on("modify", (file) => {
+				if (file instanceof TFile && file.extension === "md") {
+					void this.handleDailyNoteModify(file);
+				}
+			}),
+		);
+
+		this.app.workspace.onLayoutReady(() => {
+			void this.snapshotExistingPlanChecks();
+		});
 	}
 
 	onunload() {
@@ -347,6 +372,99 @@ export default class LifeTrackerPlugin extends Plugin {
 		}
 		setting.open();
 		setting.openTabById(this.manifest.id);
+	}
+
+	private async snapshotExistingPlanChecks(): Promise<void> {
+		const config = resolveDailyNoteConfig(this.app);
+		const heading = this.settings.planHeading;
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			const date = parseDailyNoteDateForApp(file.path, config);
+			if (!date) continue;
+			try {
+				const content = await this.app.vault.cachedRead(file);
+				for (const line of parseCheckedPlanLines(content, heading)) {
+					this.processedPlanKeys.add(planKey(file.path, line.startTime, line.label));
+				}
+			} catch {
+				// ignore unreadable files
+			}
+		}
+	}
+
+	private async handleDailyNoteModify(file: TFile): Promise<void> {
+		const config = resolveDailyNoteConfig(this.app);
+		const date = parseDailyNoteDateForApp(file.path, config);
+		if (!date) return;
+
+		let content: string;
+		try {
+			content = await this.app.vault.cachedRead(file);
+		} catch {
+			return;
+		}
+
+		const checked = parseCheckedPlanLines(content, this.settings.planHeading);
+		if (checked.length === 0) return;
+
+		const seenNow = new Set<string>();
+		const newLines: typeof checked = [];
+		for (const line of checked) {
+			const key = planKey(file.path, line.startTime, line.label);
+			seenNow.add(key);
+			if (!this.processedPlanKeys.has(key)) {
+				newLines.push(line);
+			}
+		}
+
+		// Drop processed keys for lines that no longer exist (re-opened checkbox or removed line),
+		// so a later re-check triggers a fresh log.
+		for (const key of this.processedPlanKeys) {
+			if (!key.startsWith(`${file.path}::`)) continue;
+			if (!seenNow.has(key)) this.processedPlanKeys.delete(key);
+		}
+
+		if (newLines.length === 0) return;
+
+		// Mark all new keys as processed up-front to avoid re-entrancy from our own
+		// appendEvent triggering further modifies on definition files.
+		for (const line of newLines) {
+			this.processedPlanKeys.add(planKey(file.path, line.startTime, line.label));
+		}
+
+		const { definitions } = await this.data.loadDefinitions();
+		let logged = 0;
+		const skipped: string[] = [];
+		for (const line of newLines) {
+			const def = matchDefinitionByLabel(line.label, definitions);
+			if (!def) {
+				skipped.push(`no match for "${line.label}"`);
+				continue;
+			}
+			const auto = buildAutoEvent(def, line, date);
+			if (!auto) {
+				skipped.push(`${def.displayName}: required fields, open log modal`);
+				continue;
+			}
+			const existing = await this.data.loadEvents(def.id);
+			if (existing.some((e) => e.timestamp === auto.timestamp)) continue;
+			try {
+				await this.data.appendEvent(def.id, autoEventToEventInput(auto));
+				logged += 1;
+			} catch (err) {
+				console.warn("[life-tracker] auto-log failed:", err);
+			}
+		}
+
+		if (logged > 0) {
+			new Notice(
+				logged === 1
+					? `Auto-logged 1 event from daily note`
+					: `Auto-logged ${logged} events from daily note`,
+			);
+		}
+		if (skipped.length > 0) {
+			console.info("[life-tracker] auto-log skipped:", skipped.join("; "));
+		}
 	}
 
 	private async recordRecent(id: string): Promise<void> {
