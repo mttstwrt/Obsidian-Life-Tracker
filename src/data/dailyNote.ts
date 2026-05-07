@@ -275,6 +275,45 @@ const UNCHECKED_PLAN_LINE_RE = new RegExp(
 	`^\\s*-\\s*\\[ \\]\\s*${TIME_RE_SOURCE}(?:\\s*-\\s*${TIME_RE_SOURCE})?\\s+(.*)$`,
 );
 
+export function parseUncheckedPlanLines(
+	content: string,
+	heading: string,
+): CheckedPlanLine[] {
+	const headingPattern = new RegExp(
+		`^##\\s+${escapeRegex(heading)}\\s*$`,
+		"m",
+	);
+	const match = content.match(headingPattern);
+	if (!match || match.index === undefined) return [];
+
+	const sectionStart = match.index + match[0].length;
+	const lines = content.slice(sectionStart).split("\n");
+	const out: CheckedPlanLine[] = [];
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		if (i > 0 && HEADING_PREFIX_RE.test(line)) break;
+		const m = UNCHECKED_PLAN_LINE_RE.exec(line);
+		if (!m) continue;
+		const startMin = Number(m[1]) * 60 + Number(m[2]);
+		if (!Number.isFinite(startMin) || startMin < 0 || startMin >= 24 * 60) {
+			continue;
+		}
+		const startTime = `${m[1]}:${m[2]}`;
+		let endTime: string | undefined;
+		if (m[3] !== undefined) {
+			const endMin = Number(m[3]) * 60 + Number(m[4]);
+			if (!Number.isFinite(endMin) || endMin < 0 || endMin >= 24 * 60) {
+				continue;
+			}
+			endTime = `${m[3]}:${m[4]}`;
+		}
+		const label = extractPlanLabel(m[5] ?? "");
+		if (label === "") continue;
+		out.push({ startTime, endTime, label, raw: line });
+	}
+	return out;
+}
+
 export interface MarkPlanLineMatch {
 	startTime: string;
 	endTime?: string;
@@ -347,6 +386,79 @@ export function markPlanLineCheckedForLabel(
 		candidates[0];
 
 	const newLine = chosen.raw.replace(/^(\s*-\s*)\[ \]/, "$1[x]");
+	lines[chosen.index] = newLine;
+	const updated = content.slice(0, sectionStart) + lines.join("\n");
+
+	return {
+		updated,
+		matched: {
+			startTime: chosen.startTime,
+			endTime: chosen.endTime,
+			label: chosen.lineLabel,
+			raw: newLine,
+		},
+	};
+}
+
+/**
+ * Inverse of `markPlanLineCheckedForLabel`: find the first checked plan line under
+ * `heading` whose label matches `label` case-insensitively, and toggle `[x]` → `[ ]`.
+ *
+ * If `preferredTime` is provided, prefers an exact start-time match. This is the
+ * case we care about for undo — the line we just ticked has a known start time, so
+ * we want to flip the same one back rather than the first label match.
+ */
+export function unmarkPlanLineCheckedForLabel(
+	content: string,
+	heading: string,
+	label: string,
+	preferredTime?: string,
+): MarkPlanLineResult {
+	const target = label.trim().toLowerCase();
+	if (target === "") return { updated: content, matched: null };
+
+	const headingPattern = new RegExp(
+		`^##\\s+${escapeRegex(heading)}\\s*$`,
+		"m",
+	);
+	const head = content.match(headingPattern);
+	if (!head || head.index === undefined) {
+		return { updated: content, matched: null };
+	}
+
+	const sectionStart = head.index + head[0].length;
+	const remainder = content.slice(sectionStart);
+	const lines = remainder.split("\n");
+
+	type Candidate = {
+		index: number;
+		startTime: string;
+		endTime?: string;
+		lineLabel: string;
+		raw: string;
+	};
+	const candidates: Candidate[] = [];
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		if (i > 0 && HEADING_PREFIX_RE.test(line)) break;
+		const m = CHECKED_PLAN_LINE_RE.exec(line);
+		if (!m) continue;
+		const startTime = `${m[1]}:${m[2]}`;
+		const endTime = m[3] !== undefined ? `${m[3]}:${m[4]}` : undefined;
+		const lineLabel = extractPlanLabel(m[5] ?? "");
+		if (lineLabel.toLowerCase() === target) {
+			candidates.push({ index: i, startTime, endTime, lineLabel, raw: line });
+		}
+	}
+
+	if (candidates.length === 0) return { updated: content, matched: null };
+
+	const chosen =
+		(preferredTime && candidates.find((c) => c.startTime === preferredTime)) ||
+		candidates[0];
+
+	const newLine = chosen.raw.replace(/^(\s*-\s*)\[[xX]\]/, "$1[ ]");
 	lines[chosen.index] = newLine;
 	const updated = content.slice(0, sectionStart) + lines.join("\n");
 

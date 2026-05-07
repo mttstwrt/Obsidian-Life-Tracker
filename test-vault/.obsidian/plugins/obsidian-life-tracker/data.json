@@ -2,12 +2,12 @@
   "rootFolder": "LifeTracker",
   "planHeading": "Timeline",
   "recentDefinitionIds": [
+    "wash-sheets",
     "running",
     "lifting",
     "days-without-doomscrolling",
     "books-2026",
-    "obsidian-plugin",
-    "wash-sheets"
+    "obsidian-plugin"
   ],
   "quickLogIds": [],
   "definitionOrder": {

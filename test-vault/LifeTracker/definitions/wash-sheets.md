@@ -47,3 +47,4 @@ Maintenance. Target every 14 days; nag starts at day 10.
 - 2026-04-30T22:54 | 1 |  | id="01KQGTSKVXD6JZ37TGPPSH2NVR" detergent="" water_temp=""
 - 2026-05-01T21:59 | 1 |  | id="01KQKA1TWT63AZ0Y1MXE3DZ2A3" detergent="" water_temp=""
 - 2026-05-02T03:31:25.238Z | 1 |  | id="01KQKBVCXP362XMK0R8EAP1DN0"
+- 2026-05-07T02:25:30.319Z | 1 |  | id="01KR0429PFREPX8PCPH59T7MMG"

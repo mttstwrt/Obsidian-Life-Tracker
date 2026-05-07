@@ -78,6 +78,7 @@
 					class:overdue={m.status === "overdue"}
 					class:approaching={m.status === "approaching"}
 					class:never={m.status === "never"}
+					class:ok={m.status === "ok"}
 				>
 					<button
 						type="button"
@@ -175,6 +176,9 @@
 	}
 	.lt-maint__row.never {
 		border-left-color: var(--text-faint);
+	}
+	.lt-maint__row.ok {
+		border-left-color: var(--text-success, var(--interactive-accent));
 	}
 	.lt-maint__name {
 		flex: 0 0 auto;

@@ -1,13 +1,22 @@
 <script lang="ts">
+	import { toneColor } from "../../data/visualizations";
+
 	let {
 		daysSince,
 		milestones,
 		personalBest,
+		tone = 1,
 	}: {
 		daysSince: number | null;
 		milestones: number[];
 		personalBest: number;
+		tone?: number;
 	} = $props();
+
+	const fillColor = $derived(toneColor(tone));
+	const trackColor = $derived(
+		`color-mix(in oklch, var(--background-modifier-hover), ${toneColor(tone)} 30%)`,
+	);
 
 	const sorted = $derived(
 		(milestones ?? [])
@@ -31,9 +40,13 @@
 </script>
 
 <div class="lt-mile" role="img" aria-label="milestone progress">
-	<div class="lt-mile__track">
+	<div class="lt-mile__track" style:background={trackColor}>
 		{#if daysSince !== null}
-			<div class="lt-mile__fill" style="width: {pct(daysSince)}%"></div>
+			<div
+				class="lt-mile__fill"
+				style:width="{pct(daysSince)}%"
+				style:background={fillColor}
+			></div>
 		{/if}
 		{#each sorted as m (m)}
 			<span

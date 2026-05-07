@@ -8,6 +8,7 @@
 		gridDates,
 	} from "../data/dashboard";
 	import MilestoneTimeline from "./charts/MilestoneTimeline.svelte";
+	import { toneColor } from "../data/visualizations";
 
 	let {
 		summaries,
@@ -219,7 +220,13 @@
 								</button>
 							</th>
 							<td class="lt-habits__period-cell">
-								<span>{reverseDaysSinceLabel(r)}</span>
+								<span
+									class="lt-habits__reverse-days"
+									style:color={r.daysSince === null
+										? undefined
+										: toneColor(r.tone)}
+									>{reverseDaysSinceLabel(r)}</span
+								>
 								<div class="lt-habits__period-label">
 									{#if r.nextMilestone !== undefined}
 										next {r.nextMilestone}d
@@ -237,6 +244,7 @@
 										daysSince={r.daysSince}
 										milestones={r.definition.milestones ?? []}
 										personalBest={r.personalBestDays}
+										tone={r.tone}
 									/>
 								{:else}
 									<span class="lt-habits__reverse-empty"
@@ -414,6 +422,9 @@
 	.lt-habits__row--reverse .lt-habits__cell--reverse {
 		text-align: left;
 		padding: 0 0.4rem;
+	}
+	.lt-habits__reverse-days {
+		font-weight: 600;
 	}
 	.lt-habits__reverse-empty {
 		color: var(--text-faint);

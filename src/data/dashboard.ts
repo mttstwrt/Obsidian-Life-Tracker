@@ -8,6 +8,7 @@ import type {
 	ProjectDefinition,
 	ReverseHabitDefinition,
 } from "./types";
+import { milestoneTone } from "./visualizations";
 
 export type FreshnessStatus = "never" | "ok" | "approaching" | "overdue";
 
@@ -67,6 +68,7 @@ export interface ReverseHabitSummary {
 	lastMilestone?: number;
 	nextMilestone?: number;
 	inMilestoneRange: boolean;
+	tone: number;
 }
 
 const MS_PER_DAY = 86_400_000;
@@ -414,6 +416,7 @@ export function summarizeReverseHabit(
 		lastMilestone,
 		nextMilestone,
 		inMilestoneRange,
+		tone: milestoneTone(daysSince, milestones),
 	};
 }
 

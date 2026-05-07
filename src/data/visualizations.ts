@@ -259,6 +259,52 @@ export function sparklinePath(
 	return { d: segs.join(" "), width, height, min, max };
 }
 
+export function milestoneTone(
+	daysSince: number | null,
+	milestones: number[],
+): number {
+	if (daysSince === null || daysSince <= 0) return 0;
+
+	const sorted = (milestones ?? [])
+		.filter((m) => Number.isFinite(m) && m > 0)
+		.slice()
+		.sort((a, b) => a - b);
+
+	if (sorted.length === 0) {
+		if (daysSince <= 1) return 0;
+		if (daysSince >= 3) return 1;
+		return (daysSince - 1) / 2;
+	}
+
+	const anchors = [0, ...sorted];
+	const last = anchors[anchors.length - 1];
+	if (daysSince >= last) return 1;
+
+	for (let i = 1; i < anchors.length; i++) {
+		if (daysSince <= anchors[i]) {
+			const lo = anchors[i - 1];
+			const hi = anchors[i];
+			const span = hi - lo || 1;
+			const segT = (daysSince - lo) / span;
+			const tLo = (i - 1) / (anchors.length - 1);
+			const tHi = i / (anchors.length - 1);
+			return tLo + segT * (tHi - tLo);
+		}
+	}
+	return 1;
+}
+
+export function toneColor(t: number): string {
+	const clamped = Math.min(1, Math.max(0, t));
+	const success = "var(--text-success, var(--interactive-accent))";
+	if (clamped <= 0.5) {
+		const pct = (clamped * 2 * 100).toFixed(1);
+		return `color-mix(in oklch, var(--text-error), var(--text-warning) ${pct}%)`;
+	}
+	const pct = ((clamped - 0.5) * 2 * 100).toFixed(1);
+	return `color-mix(in oklch, var(--text-warning), ${success} ${pct}%)`;
+}
+
 export interface MaintenanceTimelineMark {
 	date: string;
 	x: number;

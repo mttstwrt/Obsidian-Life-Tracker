@@ -8,10 +8,12 @@ import {
 	fieldCorrelations,
 	fieldDistribution,
 	maintenanceTimeline,
+	milestoneTone,
 	numericFieldSeries,
 	numericStats,
 	pearson,
 	sparklinePath,
+	toneColor,
 } from "../visualizations";
 import type { Event, FieldDef } from "../types";
 
@@ -240,6 +242,64 @@ describe("sparklinePath", () => {
 		expect(sp).not.toBeNull();
 		expect(sp?.min).toBe(5);
 		expect(sp?.max).toBe(5);
+	});
+});
+
+describe("milestoneTone", () => {
+	test("returns 0 for null or non-positive daysSince", () => {
+		expect(milestoneTone(null, [7, 14])).toBe(0);
+		expect(milestoneTone(0, [7, 14])).toBe(0);
+		expect(milestoneTone(-3, [7, 14])).toBe(0);
+	});
+
+	test("clamps to 1 at or past the last milestone", () => {
+		expect(milestoneTone(90, [7, 14, 30, 60, 90])).toBe(1);
+		expect(milestoneTone(120, [7, 14, 30, 60, 90])).toBe(1);
+	});
+
+	test("evenly distributes anchors across the gradient", () => {
+		// anchors: [0, 7, 14, 30, 60, 90] → t = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
+		const ms = [7, 14, 30, 60, 90];
+		expect(milestoneTone(7, ms)).toBeCloseTo(0.2, 5);
+		expect(milestoneTone(14, ms)).toBeCloseTo(0.4, 5);
+		expect(milestoneTone(30, ms)).toBeCloseTo(0.6, 5);
+		expect(milestoneTone(60, ms)).toBeCloseTo(0.8, 5);
+	});
+
+	test("interpolates linearly between anchors", () => {
+		// anchors: [0, 7, 14] → t = [0, 0.5, 1.0]
+		// daysSince=3.5 sits halfway in [0,7] → t = 0.25
+		expect(milestoneTone(3.5, [7, 14])).toBeCloseTo(0.25, 5);
+		// daysSince=10.5 sits halfway in [7,14] → t = 0.75
+		expect(milestoneTone(10.5, [7, 14])).toBeCloseTo(0.75, 5);
+	});
+
+	test("single milestone ramps red to green linearly", () => {
+		// anchors: [0, 30] → t at midpoint = 0.5
+		expect(milestoneTone(15, [30])).toBeCloseTo(0.5, 5);
+		expect(milestoneTone(30, [30])).toBe(1);
+	});
+
+	test("falls back to fixed cooldown with no milestones", () => {
+		expect(milestoneTone(1, [])).toBe(0);
+		expect(milestoneTone(2, [])).toBeCloseTo(0.5, 5);
+		expect(milestoneTone(3, [])).toBe(1);
+		expect(milestoneTone(10, [])).toBe(1);
+	});
+
+	test("ignores invalid milestone entries", () => {
+		// only 7 and 14 survive filtering → same shape as [7, 14]
+		expect(milestoneTone(7, [-1, 0, Number.NaN, 7, 14])).toBeCloseTo(0.5, 5);
+	});
+});
+
+describe("toneColor", () => {
+	test("clamps and interpolates through warning at midpoint", () => {
+		expect(toneColor(0)).toContain("text-error");
+		expect(toneColor(1)).toContain("text-success");
+		expect(toneColor(0.5)).toContain("text-warning");
+		expect(toneColor(-1)).toContain("text-error");
+		expect(toneColor(2)).toContain("text-success");
 	});
 });
 

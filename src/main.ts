@@ -1,6 +1,9 @@
 import { Notice, Plugin, TFile, type WorkspaceLeaf } from "obsidian";
 import { DataLayer } from "./data/dataLayer";
-import { parseCheckedPlanLines } from "./data/dailyNote";
+import {
+	parseCheckedPlanLines,
+	parseUncheckedPlanLines,
+} from "./data/dailyNote";
 import {
 	addPlanLineToDailyNote,
 	findOpenSlotForDate,
@@ -9,11 +12,13 @@ import {
 	markPlanLineForEvent,
 	parseDailyNoteDateForApp,
 	resolveDailyNoteConfig,
+	unmarkPlanLineForEvent,
 } from "./data/dailyNoteService";
 import type { PlanFormSuccess } from "./data/planForm";
 import {
 	autoEventToEventInput,
 	buildAutoEvent,
+	buildPlannedTimestamp,
 	matchDefinitionByLabel,
 } from "./data/planSync";
 import { ObsidianVaultAdapter, type VaultAdapter } from "./data/vaultAdapter";
@@ -21,10 +26,11 @@ import type { Definition, Event } from "./data/types";
 import { DashboardView, VIEW_TYPE_DASHBOARD } from "./views/DashboardView";
 import { DefinitionFormModal } from "./views/DefinitionFormModal";
 import { EventDetailModal } from "./views/EventDetailModal";
-import { LogEventModal } from "./views/LogEventModal";
+import { LogEventModal, type LogMode } from "./views/LogEventModal";
 import { PickDefinitionModal } from "./views/PickDefinitionModal";
 import { ReorderModal, type ReorderItem } from "./views/ReorderModal";
 import { LifeTrackerSettingTab } from "./views/SettingsTab";
+import { showUndoableLogNotice } from "./views/undoLogNotice";
 import "virtual:uno.css";
 
 export type OrderTabKey = "habits" | "counters" | "maintenance" | "projects";
@@ -51,6 +57,12 @@ const RECENT_LIMIT = 20;
 
 function planKey(path: string, startTime: string, label: string): string {
 	return `${path}::${startTime}::${label.toLowerCase()}`;
+}
+
+interface MarkedPlanInfo {
+	path: string;
+	startTime: string;
+	label: string;
 }
 
 export default class LifeTrackerPlugin extends Plugin {
@@ -229,7 +241,8 @@ export default class LifeTrackerPlugin extends Plugin {
 			this.settings.recentDefinitionIds,
 			(def) => {
 				new LogEventModal(this.app, this.data, def, {
-					onLogged: (id, ev) => this.afterEventLogged(id, ev),
+					onLogged: (_id, ev, mode) =>
+						this.handleEventLogged(def, ev, mode),
 					onPlan: (planned) => this.handlePlan(def, planned),
 					findSlot: (date, durationMin) =>
 						this.findOpenSlot(date, durationMin),
@@ -251,7 +264,7 @@ export default class LifeTrackerPlugin extends Plugin {
 		}
 		new LogEventModal(this.app, this.data, def, {
 			initialDate: opts.initialDate,
-			onLogged: (id, ev) => this.afterEventLogged(id, ev),
+			onLogged: (_id, ev, mode) => this.handleEventLogged(def, ev, mode),
 			onPlan: (planned) => this.handlePlan(def, planned),
 			findSlot: (date, durationMin) =>
 				this.findOpenSlot(date, durationMin),
@@ -312,8 +325,7 @@ export default class LifeTrackerPlugin extends Plugin {
 				value: 1,
 				fields: {},
 			});
-			await this.afterEventLogged(definitionId, logged);
-			new Notice(`Logged ${def.displayName}`);
+			await this.handleEventLogged(def, logged, "create");
 		} catch (err) {
 			new Notice(`Failed: ${(err as Error).message ?? String(err)}`);
 		}
@@ -408,29 +420,47 @@ export default class LifeTrackerPlugin extends Plugin {
 			return;
 		}
 
-		const checked = parseCheckedPlanLines(content, this.settings.planHeading);
-		if (checked.length === 0) return;
+		const heading = this.settings.planHeading;
+		const checked = parseCheckedPlanLines(content, heading);
+		const unchecked = parseUncheckedPlanLines(content, heading);
 
-		const seenNow = new Set<string>();
+		const checkedKeys = new Set<string>();
 		const newLines: typeof checked = [];
 		for (const line of checked) {
 			const key = planKey(file.path, line.startTime, line.label);
-			seenNow.add(key);
+			checkedKeys.add(key);
 			if (!this.processedPlanKeys.has(key)) {
 				newLines.push(line);
 			}
 		}
 
-		// Drop processed keys for lines that no longer exist (re-opened checkbox or removed line),
-		// so a later re-check triggers a fresh log.
-		for (const key of this.processedPlanKeys) {
-			if (!key.startsWith(`${file.path}::`)) continue;
-			if (!seenNow.has(key)) this.processedPlanKeys.delete(key);
+		// Index currently-unchecked lines so we can detect the checked→unchecked
+		// transition for previously-tracked keys.
+		const uncheckedByKey = new Map<string, (typeof unchecked)[number]>();
+		for (const line of unchecked) {
+			uncheckedByKey.set(
+				planKey(file.path, line.startTime, line.label),
+				line,
+			);
 		}
 
-		if (newLines.length === 0) return;
+		// Tracked keys for this file that are no longer checked: either the user
+		// unchecked the box (line still present, just `[ ]`) or removed/edited
+		// the line. Only the still-present-but-unchecked case triggers an unlog;
+		// a removed line is left alone so manual edits don't delete events.
+		const uncheckedTransitions: (typeof unchecked)[number][] = [];
+		const filePrefix = `${file.path}::`;
+		for (const key of this.processedPlanKeys) {
+			if (!key.startsWith(filePrefix)) continue;
+			if (checkedKeys.has(key)) continue;
+			this.processedPlanKeys.delete(key);
+			const line = uncheckedByKey.get(key);
+			if (line) uncheckedTransitions.push(line);
+		}
 
-		// Mark all new keys as processed up-front to avoid re-entrancy from our own
+		if (newLines.length === 0 && uncheckedTransitions.length === 0) return;
+
+		// Mark new checked keys up-front to avoid re-entrancy from our own
 		// appendEvent triggering further modifies on definition files.
 		for (const line of newLines) {
 			this.processedPlanKeys.add(planKey(file.path, line.startTime, line.label));
@@ -438,7 +468,9 @@ export default class LifeTrackerPlugin extends Plugin {
 
 		const { definitions } = await this.data.loadDefinitions();
 		let logged = 0;
+		let unlogged = 0;
 		const skipped: string[] = [];
+
 		for (const line of newLines) {
 			const def = matchDefinitionByLabel(line.label, definitions);
 			if (!def) {
@@ -460,11 +492,38 @@ export default class LifeTrackerPlugin extends Plugin {
 			}
 		}
 
+		for (const line of uncheckedTransitions) {
+			const def = matchDefinitionByLabel(line.label, definitions);
+			if (!def) continue;
+			// Match by exact timestamp string. buildPlannedTimestamp produces the
+			// same value the auto-log path stored, so this targets the auto-logged
+			// event for this date+startTime — and avoids deleting events from
+			// other days or manual logs (which carry seconds/milliseconds).
+			const expected = buildPlannedTimestamp(date, line.startTime);
+			if (!expected) continue;
+			const existing = await this.data.loadEvents(def.id);
+			const match = existing.find((e) => e.timestamp === expected);
+			if (!match) continue;
+			try {
+				await this.data.deleteEvent(def.id, match.id);
+				unlogged += 1;
+			} catch (err) {
+				console.warn("[life-tracker] auto-unlog failed:", err);
+			}
+		}
+
 		if (logged > 0) {
 			new Notice(
 				logged === 1
 					? `Auto-logged 1 event from daily note`
 					: `Auto-logged ${logged} events from daily note`,
+			);
+		}
+		if (unlogged > 0) {
+			new Notice(
+				unlogged === 1
+					? `Removed 1 auto-logged event`
+					: `Removed ${unlogged} auto-logged events`,
 			);
 		}
 		if (skipped.length > 0) {
@@ -475,24 +534,38 @@ export default class LifeTrackerPlugin extends Plugin {
 	private async afterEventLogged(
 		definitionId: string,
 		event: Event,
-	): Promise<void> {
+	): Promise<MarkedPlanInfo | null> {
 		await this.recordRecent(definitionId);
 		const def = await this.data.getDefinition(definitionId);
-		if (def) {
-			await this.syncEventToDailyNote(def, event);
+		if (!def) return null;
+		return await this.syncEventToDailyNote(def, event);
+	}
+
+	private async handleEventLogged(
+		def: Definition,
+		event: Event,
+		mode: LogMode,
+	): Promise<void> {
+		const marked = await this.afterEventLogged(def.id, event);
+		if (mode === "create") {
+			showUndoableLogNotice(this.data, def.id, event.id, def.displayName, {
+				onAfterDelete: marked
+					? () => this.untickPlanLineForUndo(marked)
+					: undefined,
+			});
 		}
 	}
 
 	private async syncEventToDailyNote(
 		def: Definition,
 		event: Event,
-	): Promise<void> {
+	): Promise<MarkedPlanInfo | null> {
 		const ts = new Date(event.timestamp);
-		if (Number.isNaN(ts.getTime())) return;
+		if (Number.isNaN(ts.getTime())) return null;
 		const date = localDateString(ts);
 		const time = localTimeString(ts);
 		try {
-			await markPlanLineForEvent({
+			const result = await markPlanLineForEvent({
 				app: this.app,
 				vault: this.vaultAdapter,
 				date,
@@ -507,9 +580,32 @@ export default class LifeTrackerPlugin extends Plugin {
 					);
 				},
 			});
+			if (!result) return null;
+			return {
+				path: result.path,
+				startTime: result.matched.startTime,
+				label: result.matched.label,
+			};
 		} catch (err) {
 			console.warn("[life-tracker] sync event → checkbox failed:", err);
+			return null;
 		}
+	}
+
+	private async untickPlanLineForUndo(marked: MarkedPlanInfo): Promise<void> {
+		// Pre-drop the plan key so the modify watcher doesn't try to also
+		// auto-unlog the event we already deleted.
+		this.processedPlanKeys.delete(
+			planKey(marked.path, marked.startTime, marked.label),
+		);
+		await unmarkPlanLineForEvent({
+			app: this.app,
+			vault: this.vaultAdapter,
+			path: marked.path,
+			heading: this.settings.planHeading,
+			label: marked.label,
+			time: marked.startTime,
+		});
 	}
 
 	private async recordRecent(id: string): Promise<void> {

@@ -9,6 +9,8 @@ import {
 	parseCheckedPlanLines,
 	parseDailyNotePath,
 	parsePlannedBlocks,
+	parseUncheckedPlanLines,
+	unmarkPlanLineCheckedForLabel,
 } from "../dailyNote";
 
 describe("formatPlanLine", () => {
@@ -656,5 +658,124 @@ describe("markPlanLineCheckedForLabel", () => {
 		// Notes must not be touched.
 		expect(result.matched?.startTime).toBe("07:00");
 		expect(result.updated).toContain("## Notes\n- [ ] 08:00 Run #habit");
+	});
+});
+
+describe("parseUncheckedPlanLines", () => {
+	test("returns lines with `[ ]` and skips checked ones", () => {
+		const content = [
+			"## Timeline",
+			"- [ ] 07:00 Run #habit",
+			"- [x] 08:00 Stretch #habit",
+			"- [ ] 13:30 - 14:00 Pull-ups #habit",
+		].join("\n");
+		const result = parseUncheckedPlanLines(content, "Timeline");
+		expect(result).toHaveLength(2);
+		expect(result[0]).toMatchObject({ startTime: "07:00", label: "Run" });
+		expect(result[1]).toMatchObject({
+			startTime: "13:30",
+			endTime: "14:00",
+			label: "Pull-ups",
+		});
+	});
+
+	test("returns [] when heading missing", () => {
+		expect(parseUncheckedPlanLines("- [ ] 07:00 Run", "Timeline")).toEqual([]);
+	});
+
+	test("stops at next heading", () => {
+		const content = [
+			"## Timeline",
+			"- [ ] 07:00 Run #habit",
+			"## Notes",
+			"- [ ] 08:00 Run #habit",
+		].join("\n");
+		const result = parseUncheckedPlanLines(content, "Timeline");
+		expect(result).toHaveLength(1);
+		expect(result[0].startTime).toBe("07:00");
+	});
+});
+
+describe("unmarkPlanLineCheckedForLabel", () => {
+	test("flips [x] back to [ ] on the matching line", () => {
+		const content = ["## Timeline", "- [x] 07:00 Run #habit"].join("\n");
+		const result = unmarkPlanLineCheckedForLabel(content, "Timeline", "Run");
+		expect(result.matched?.startTime).toBe("07:00");
+		expect(result.updated).toContain("- [ ] 07:00 Run #habit");
+	});
+
+	test("prefers exact start-time match", () => {
+		const content = [
+			"## Timeline",
+			"- [x] 07:00 Run #habit",
+			"- [x] 17:00 Run #habit",
+		].join("\n");
+		const result = unmarkPlanLineCheckedForLabel(
+			content,
+			"Timeline",
+			"Run",
+			"17:00",
+		);
+		expect(result.matched?.startTime).toBe("17:00");
+		expect(result.updated).toContain("- [x] 07:00 Run #habit");
+		expect(result.updated).toContain("- [ ] 17:00 Run #habit");
+	});
+
+	test("ignores unchecked lines", () => {
+		const content = [
+			"## Timeline",
+			"- [ ] 07:00 Run #habit",
+			"- [x] 17:00 Run #habit",
+		].join("\n");
+		const result = unmarkPlanLineCheckedForLabel(content, "Timeline", "Run");
+		expect(result.matched?.startTime).toBe("17:00");
+		expect(result.updated).toContain("- [ ] 07:00 Run #habit");
+		expect(result.updated).toContain("- [ ] 17:00 Run #habit");
+	});
+
+	test("handles capital [X]", () => {
+		const content = ["## Timeline", "- [X] 07:00 Run #habit"].join("\n");
+		const result = unmarkPlanLineCheckedForLabel(content, "Timeline", "Run");
+		expect(result.matched?.startTime).toBe("07:00");
+		expect(result.updated).toContain("- [ ] 07:00 Run #habit");
+	});
+
+	test("returns null match when nothing fits", () => {
+		const content = ["## Timeline", "- [x] 07:00 Run #habit"].join("\n");
+		const result = unmarkPlanLineCheckedForLabel(
+			content,
+			"Timeline",
+			"Lunch",
+		);
+		expect(result.matched).toBeNull();
+		expect(result.updated).toBe(content);
+	});
+
+	test("doesn't cross into the next heading", () => {
+		const content = [
+			"## Timeline",
+			"- [x] 07:00 Run #habit",
+			"## Notes",
+			"- [x] 08:00 Run #habit",
+		].join("\n");
+		const result = unmarkPlanLineCheckedForLabel(
+			content,
+			"Timeline",
+			"Run",
+			"08:00",
+		);
+		expect(result.matched?.startTime).toBe("07:00");
+		expect(result.updated).toContain("## Notes\n- [x] 08:00 Run #habit");
+	});
+
+	test("round-trips with mark", () => {
+		const content = ["## Timeline", "- [ ] 07:00 Run #habit"].join("\n");
+		const checked = markPlanLineCheckedForLabel(content, "Timeline", "Run");
+		const reverted = unmarkPlanLineCheckedForLabel(
+			checked.updated,
+			"Timeline",
+			"Run",
+		);
+		expect(reverted.updated).toBe(content);
 	});
 });

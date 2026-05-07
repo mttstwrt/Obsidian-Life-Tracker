@@ -57,7 +57,7 @@
 	function colorFor(tone: Tone): string {
 		if (tone === "bad") return "var(--text-error)";
 		if (tone === "warn") return "var(--text-warning)";
-		return "var(--interactive-accent)";
+		return "var(--text-success, var(--interactive-accent))";
 	}
 </script>
 

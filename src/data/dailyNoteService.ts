@@ -18,6 +18,7 @@ import {
 	markPlanLineCheckedForLabel,
 	parseDailyNotePath,
 	parsePlannedBlocks,
+	unmarkPlanLineCheckedForLabel,
 } from "./dailyNote";
 import type { VaultAdapter } from "./vaultAdapter";
 
@@ -160,6 +161,40 @@ export async function markPlanLineForEvent(
 	opts.beforeWrite?.({ path, matched: result.matched });
 	await opts.vault.write(path, result.updated);
 	return { path, matched: result.matched };
+}
+
+export interface UnmarkPlanLineForEventOpts {
+	app: App;
+	vault: VaultAdapter;
+	path: string;
+	heading: string;
+	label: string;
+	time?: string;
+	beforeWrite?: (info: { path: string; matched: MarkPlanLineMatch }) => void;
+}
+
+/**
+ * Inverse of `markPlanLineForEvent`: in the daily note at `path`, find the
+ * checked plan line whose label matches and (if `time` given) start time matches,
+ * and toggle it back to unchecked. Returns the matched line, or null if no
+ * candidate was found.
+ */
+export async function unmarkPlanLineForEvent(
+	opts: UnmarkPlanLineForEventOpts,
+): Promise<{ path: string; matched: MarkPlanLineMatch } | null> {
+	if (!(await opts.vault.exists(opts.path))) return null;
+	const content = await opts.vault.read(opts.path);
+	const result = unmarkPlanLineCheckedForLabel(
+		content,
+		opts.heading,
+		opts.label,
+		opts.time,
+	);
+	if (!result.matched || result.updated === content) return null;
+
+	opts.beforeWrite?.({ path: opts.path, matched: result.matched });
+	await opts.vault.write(opts.path, result.updated);
+	return { path: opts.path, matched: result.matched };
 }
 
 /**

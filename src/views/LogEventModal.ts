@@ -6,21 +6,31 @@ import type { LogFormSuccess } from "../data/logForm";
 import type { PlanFormSuccess } from "../data/planForm";
 import type { Definition, Event } from "../data/types";
 
+export type LogMode = "create" | "edit";
+
 export interface LogEventModalOpts {
-	mode?: "create" | "edit";
+	mode?: LogMode;
 	existingEvent?: Event;
 	initialDate?: string;
-	onLogged?: (definitionId: string, event: Event) => void | Promise<void>;
+	onLogged?: (
+		definitionId: string,
+		event: Event,
+		mode: LogMode,
+	) => void | Promise<void>;
 	onPlan?: (planned: PlanFormSuccess) => Promise<void> | void;
 	findSlot?: (date: string, durationMin: number) => Promise<string | null>;
 }
 
 export class LogEventModal extends Modal {
 	private component: ReturnType<typeof mount> | null = null;
-	private mode: "create" | "edit";
+	private mode: LogMode;
 	private existingEvent?: Event;
 	private initialDate?: string;
-	private onLogged?: (definitionId: string, event: Event) => void | Promise<void>;
+	private onLogged?: (
+		definitionId: string,
+		event: Event,
+		mode: LogMode,
+	) => void | Promise<void>;
 	private onPlan?: (planned: PlanFormSuccess) => Promise<void> | void;
 	private findSlot?: (
 		date: string,
@@ -93,9 +103,11 @@ export class LogEventModal extends Modal {
 								note: submitted.event.note,
 								fields: submitted.event.fields,
 							});
-							new Notice(`Logged ${this.definition.displayName}`);
+							// success notice (with Undo) is fired by the plugin's
+							// onLogged handler so it can wire in the daily-note
+							// untick cleanup.
 						}
-						await this.onLogged?.(this.definition.id, logged);
+						await this.onLogged?.(this.definition.id, logged, this.mode);
 						this.close();
 					} catch (err) {
 						new Notice(
