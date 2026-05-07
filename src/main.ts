@@ -24,6 +24,7 @@ import {
 import { ObsidianVaultAdapter, type VaultAdapter } from "./data/vaultAdapter";
 import type { Definition, Event } from "./data/types";
 import { DashboardView, VIEW_TYPE_DASHBOARD } from "./views/DashboardView";
+import { SidebarView, VIEW_TYPE_SIDEBAR } from "./views/SidebarView";
 import { DefinitionFormModal } from "./views/DefinitionFormModal";
 import { EventDetailModal } from "./views/EventDetailModal";
 import { LogEventModal, type LogMode } from "./views/LogEventModal";
@@ -94,6 +95,10 @@ export default class LifeTrackerPlugin extends Plugin {
 			const view = leaf.view as DashboardView;
 			view.refresh?.();
 		}
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_SIDEBAR)) {
+			const view = leaf.view as SidebarView;
+			view.refresh?.();
+		}
 	}
 
 	async openReorderModal(tab: OrderTabKey): Promise<void> {
@@ -161,15 +166,29 @@ export default class LifeTrackerPlugin extends Plugin {
 			VIEW_TYPE_DASHBOARD,
 			(leaf) => new DashboardView(leaf, this),
 		);
+		this.registerView(
+			VIEW_TYPE_SIDEBAR,
+			(leaf) => new SidebarView(leaf, this),
+		);
 
 		this.addRibbonIcon("activity", "Open Life Tracker dashboard", () => {
 			this.openDashboard();
+		});
+
+		this.addRibbonIcon("list-checks", "Open Life Tracker sidebar", () => {
+			this.openSidebar();
 		});
 
 		this.addCommand({
 			id: "open-dashboard",
 			name: "Open dashboard",
 			callback: () => this.openDashboard(),
+		});
+
+		this.addCommand({
+			id: "open-sidebar",
+			name: "Open sidebar",
+			callback: () => this.openSidebar(),
 		});
 
 		this.addCommand({
@@ -228,6 +247,21 @@ export default class LifeTrackerPlugin extends Plugin {
 			leaf = workspace.getLeaf("tab");
 			await leaf.setViewState({
 				type: VIEW_TYPE_DASHBOARD,
+				active: true,
+			});
+		}
+		workspace.revealLeaf(leaf);
+	}
+
+	async openSidebar(): Promise<void> {
+		const { workspace } = this.app;
+		let leaf: WorkspaceLeaf | null =
+			workspace.getLeavesOfType(VIEW_TYPE_SIDEBAR)[0] ?? null;
+		if (!leaf) {
+			leaf = workspace.getRightLeaf(false);
+			if (!leaf) return;
+			await leaf.setViewState({
+				type: VIEW_TYPE_SIDEBAR,
 				active: true,
 			});
 		}

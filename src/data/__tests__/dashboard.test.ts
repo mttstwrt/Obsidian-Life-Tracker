@@ -190,6 +190,92 @@ describe("summarizeHabit", () => {
 		expect(summary.currentStreak).toBe(3);
 	});
 
+	test("weekly streak preserved when current week incomplete", () => {
+		// Now = Mon May 4, 2026 — current week starts today, no events yet.
+		const now = new Date(2026, 4, 4, 9);
+		const events = [
+			// week of Apr 27–May 3: 4 events (target met)
+			ev(new Date(2026, 3, 27, 8).toISOString()),
+			ev(new Date(2026, 3, 29, 8).toISOString()),
+			ev(new Date(2026, 4, 1, 8).toISOString()),
+			ev(new Date(2026, 4, 3, 8).toISOString()),
+			// week of Apr 20–26: 4 events (target met)
+			ev(new Date(2026, 3, 20, 8).toISOString()),
+			ev(new Date(2026, 3, 22, 8).toISOString()),
+			ev(new Date(2026, 3, 24, 8).toISOString()),
+			ev(new Date(2026, 3, 26, 8).toISOString()),
+		];
+		const s = summarizeHabit(HABIT, events, now);
+		expect(s.periodCount).toBe(0);
+		expect(s.currentStreak).toBe(2);
+	});
+
+	test("weekly streak adds current week when target met", () => {
+		// Now = Fri May 8, 2026 — week of May 4–10, 4 events logged Mon–Thu.
+		const now = new Date(2026, 4, 8, 18);
+		const events = [
+			ev(new Date(2026, 4, 4, 8).toISOString()),
+			ev(new Date(2026, 4, 5, 8).toISOString()),
+			ev(new Date(2026, 4, 6, 8).toISOString()),
+			ev(new Date(2026, 4, 7, 8).toISOString()),
+			// Prior week Apr 27–May 3: 4 events
+			ev(new Date(2026, 3, 27, 8).toISOString()),
+			ev(new Date(2026, 3, 29, 8).toISOString()),
+			ev(new Date(2026, 4, 1, 8).toISOString()),
+			ev(new Date(2026, 4, 3, 8).toISOString()),
+		];
+		const s = summarizeHabit(HABIT, events, now);
+		expect(s.periodCount).toBe(4);
+		expect(s.currentStreak).toBe(2);
+	});
+
+	test("weekly streak breaks on a missed prior week", () => {
+		// Now = Mon May 4, 2026. Prior week (Apr 27–May 3) had only 1 event — under target.
+		const now = new Date(2026, 4, 4, 9);
+		const events = [
+			ev(new Date(2026, 3, 28, 8).toISOString()), // 1 event in prior week
+			// week of Apr 20–26: 4 events (would be a streak if reachable)
+			ev(new Date(2026, 3, 20, 8).toISOString()),
+			ev(new Date(2026, 3, 22, 8).toISOString()),
+			ev(new Date(2026, 3, 24, 8).toISOString()),
+			ev(new Date(2026, 3, 26, 8).toISOString()),
+		];
+		const s = summarizeHabit(HABIT, events, now);
+		expect(s.currentStreak).toBe(0);
+	});
+
+	test("monthly streak walks back through completed calendar months", () => {
+		const monthly: HabitDefinition = { ...HABIT, targetCadence: "5/month" };
+		// Now = May 5, 2026; current month has 1 event (under target).
+		const now = new Date(2026, 4, 5, 9);
+		const events = [
+			ev(new Date(2026, 4, 2, 8).toISOString()),
+			// April: 5 events
+			ev(new Date(2026, 3, 2, 8).toISOString()),
+			ev(new Date(2026, 3, 9, 8).toISOString()),
+			ev(new Date(2026, 3, 16, 8).toISOString()),
+			ev(new Date(2026, 3, 23, 8).toISOString()),
+			ev(new Date(2026, 3, 30, 8).toISOString()),
+			// March: 5 events
+			ev(new Date(2026, 2, 3, 8).toISOString()),
+			ev(new Date(2026, 2, 10, 8).toISOString()),
+			ev(new Date(2026, 2, 17, 8).toISOString()),
+			ev(new Date(2026, 2, 24, 8).toISOString()),
+			ev(new Date(2026, 2, 31, 8).toISOString()),
+			// February: 2 events (under target — chain breaks here)
+			ev(new Date(2026, 1, 4, 8).toISOString()),
+			ev(new Date(2026, 1, 18, 8).toISOString()),
+		];
+		const s = summarizeHabit(monthly, events, now);
+		expect(s.currentStreak).toBe(2);
+	});
+
+	test("streak is 0 when no events", () => {
+		const now = new Date(2026, 4, 4, 9);
+		const s = summarizeHabit(HABIT, [], now);
+		expect(s.currentStreak).toBe(0);
+	});
+
 	test("rolling weekly window counts past 7 days", () => {
 		// Today is Mon May 4, 2026; calendar week just started (no events yet this week)
 		const now = new Date(2026, 4, 4, 12);

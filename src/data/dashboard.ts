@@ -177,6 +177,61 @@ export function summarizeAll(input: DashboardInput): DashboardSummaries {
 	return { habits, maintenance, projects, counters, reverseHabits };
 }
 
+type CadencePeriod = "day" | "week" | "month";
+
+function periodStart(d: Date, period: CadencePeriod): Date {
+	if (period === "day") return startOfDay(d);
+	if (period === "week") return startOfWeekMonday(d);
+	return startOfMonth(d);
+}
+
+function prevPeriodStart(start: Date, period: CadencePeriod): Date {
+	const prev = new Date(start);
+	if (period === "day") prev.setDate(prev.getDate() - 1);
+	else if (period === "week") prev.setDate(prev.getDate() - 7);
+	else prev.setMonth(prev.getMonth() - 1);
+	return prev;
+}
+
+function computeHabitStreak(
+	events: Event[],
+	cadence: { count: number; period: CadencePeriod },
+	now: Date,
+	currentPeriodCount: number,
+	target: number,
+): number {
+	if (target <= 0) return 0;
+	const periodCounts = new Map<string, number>();
+	for (const e of events) {
+		const ts = parseTimestamp(e.timestamp);
+		if (!ts) continue;
+		const key = dateString(periodStart(ts, cadence.period));
+		periodCounts.set(key, (periodCounts.get(key) ?? 0) + 1);
+	}
+	let streak = 0;
+	let cursor = prevPeriodStart(periodStart(now, cadence.period), cadence.period);
+	// Stop walking once events run out — a period with no events is unmet and breaks the chain.
+	const oldest = events.reduce<Date | null>((acc, e) => {
+		const ts = parseTimestamp(e.timestamp);
+		if (!ts) return acc;
+		if (acc === null || ts < acc) return ts;
+		return acc;
+	}, null);
+	const oldestPeriodStart = oldest ? periodStart(oldest, cadence.period) : null;
+	while (true) {
+		if (oldestPeriodStart && cursor < oldestPeriodStart) break;
+		const count = periodCounts.get(dateString(cursor)) ?? 0;
+		if (count >= target) {
+			streak += 1;
+			cursor = prevPeriodStart(cursor, cadence.period);
+		} else {
+			break;
+		}
+	}
+	if (currentPeriodCount >= target) streak += 1;
+	return streak;
+}
+
 export function summarizeHabit(
 	def: HabitDefinition,
 	events: Event[],
@@ -230,22 +285,11 @@ export function summarizeHabit(
 
 	const last = lastEvent(events);
 
-	let currentStreak = 0;
-	if (recentByDate.size > 0) {
-		const cursor = new Date(today);
-		while (true) {
-			const key = dateString(cursor);
-			if ((recentByDate.get(key) ?? 0) > 0) {
-				currentStreak += 1;
-				cursor.setDate(cursor.getDate() - 1);
-			} else {
-				break;
-			}
-		}
-	}
-
 	const periodTarget = cadence ? cadence.count : 0;
 	const dueToday = cadence ? periodCount < periodTarget : false;
+	const currentStreak = cadence
+		? computeHabitStreak(events, cadence, now, periodCount, periodTarget)
+		: 0;
 
 	return {
 		definition: def,
