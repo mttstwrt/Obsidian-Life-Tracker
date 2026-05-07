@@ -413,6 +413,22 @@ describe("extractPlanLabel", () => {
 	test("returns empty when nothing remains", () => {
 		expect(extractPlanLabel("   ")).toBe("");
 	});
+
+	test("strips Tasks plugin done-date suffix", () => {
+		expect(extractPlanLabel("Lifting #habit ✅ 2026-05-06")).toBe("Lifting");
+	});
+
+	test("strips multiple Tasks plugin metadata markers", () => {
+		expect(
+			extractPlanLabel("Run #habit 📅 2026-05-01 ✅ 2026-05-06"),
+		).toBe("Run");
+	});
+
+	test("strips Tasks priority and recurrence markers", () => {
+		expect(extractPlanLabel("Wash sheets #maint 🔁 every week ⏫")).toBe(
+			"Wash sheets",
+		);
+	});
 });
 
 describe("parseDailyNotePath", () => {

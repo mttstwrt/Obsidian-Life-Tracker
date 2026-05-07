@@ -224,9 +224,15 @@ const CHECKED_PLAN_LINE_RE = new RegExp(
 
 const PROJECT_PREFIX_RE = /^Project:\s+/i;
 const TRAILING_TAGS_RE = /(?:\s+#[A-Za-z0-9_\-/]+)+\s*$/;
+// Tasks plugin metadata markers (done/due/start/scheduled/created/cancelled
+// dates, recurrence, id, depends-on, priorities). Always trail the description,
+// so we strip from the first marker to end-of-line.
+const TASKS_METADATA_TRAILING_RE =
+	/\s+[\u{1F4C5}\u{2705}\u{1F6EB}\u{23F3}\u{2795}\u{274C}\u{1F501}\u{1F194}\u{26D3}\u{1F53A}\u{23EB}\u{1F53C}\u{1F53D}\u{23EC}].*$/u;
 
 export function extractPlanLabel(text: string): string {
 	let s = text.trim();
+	s = s.replace(TASKS_METADATA_TRAILING_RE, "");
 	s = s.replace(TRAILING_TAGS_RE, "");
 	s = s.replace(PROJECT_PREFIX_RE, "");
 	return s.trim();
