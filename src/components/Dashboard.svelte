@@ -174,6 +174,7 @@
 					{eventsByDefinition}
 					{definitions}
 					{warnings}
+					{plugin}
 				/>
 			{:else if activeTab === "settings"}
 				<DashboardSettings {plugin} {definitions} />

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type LifeTrackerPlugin from "../main";
 	import type { DashboardSummaries } from "../data/dashboard";
 	import type { Definition, Event as TrackerEvent } from "../data/types";
 	import {
@@ -15,12 +16,140 @@
 		eventsByDefinition,
 		definitions,
 		warnings,
+		plugin,
 	}: {
 		summaries: DashboardSummaries;
 		eventsByDefinition: Map<string, TrackerEvent[]>;
 		definitions: Definition[];
 		warnings: string[];
+		plugin: LifeTrackerPlugin;
 	} = $props();
+
+	type ActivityWindow = "1" | "7" | "14" | "30";
+	let activityWindow: ActivityWindow = $state("7");
+	const activityWindowOptions: { value: ActivityWindow; label: string }[] = [
+		{ value: "1", label: "Yesterday" },
+		{ value: "7", label: "Past 7 days" },
+		{ value: "14", label: "Past 2 weeks" },
+		{ value: "30", label: "Past month" },
+	];
+
+	function startOfLocalDay(d: Date): Date {
+		return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+	}
+
+	function dayKey(d: Date): string {
+		const y = d.getFullYear();
+		const m = String(d.getMonth() + 1).padStart(2, "0");
+		const day = String(d.getDate()).padStart(2, "0");
+		return `${y}-${m}-${day}`;
+	}
+
+	const DAY_MS = 24 * 60 * 60 * 1000;
+
+	function dayLabel(d: Date, todayStart: Date): string {
+		const daysAgo = Math.round((todayStart.getTime() - d.getTime()) / DAY_MS);
+		if (daysAgo === 0) return "Today";
+		if (daysAgo === 1) return "Yesterday";
+		const weekday = d.toLocaleDateString(undefined, { weekday: "short" });
+		const monthDay = d.toLocaleDateString(undefined, {
+			month: "short",
+			day: "numeric",
+		});
+		return `${weekday}, ${monthDay}`;
+	}
+
+	function eventTime(ts: string): string {
+		const d = new Date(ts);
+		if (Number.isNaN(d.getTime())) return "";
+		return d.toLocaleTimeString(undefined, {
+			hour: "2-digit",
+			minute: "2-digit",
+			hour12: false,
+		});
+	}
+
+	function formatEventValue(def: Definition, ev: TrackerEvent): string {
+		if (def.kind === "maintenance") return "✓";
+		if (ev.value === undefined || ev.value === null) return "";
+		if (def.kind === "habit") {
+			if (def.valueType === "boolean") return "✓";
+			const unit =
+				def.unit ?? (def.valueType === "duration" ? "min" : "");
+			return unit ? `${ev.value} ${unit}` : `${ev.value}`;
+		}
+		if (def.kind === "counter") {
+			return def.unit ? `${ev.value} ${def.unit}` : `${ev.value}`;
+		}
+		if (def.kind === "project") {
+			return `${ev.value}`;
+		}
+		// reverse-habit: value rare; show if present
+		return `${ev.value}`;
+	}
+
+	type DayGroup = {
+		key: string;
+		date: Date;
+		entries: { event: TrackerEvent; definition: Definition }[];
+	};
+
+	const dailyActivity = $derived.by((): {
+		days: DayGroup[];
+		totalEvents: number;
+		earliest: Date;
+		latest: Date;
+	} => {
+		const today = startOfLocalDay(new Date());
+		let earliest: Date;
+		let latest: Date;
+		if (activityWindow === "1") {
+			earliest = new Date(today);
+			earliest.setDate(earliest.getDate() - 1);
+			latest = earliest;
+		} else {
+			const n = parseInt(activityWindow, 10);
+			earliest = new Date(today);
+			earliest.setDate(earliest.getDate() - (n - 1));
+			latest = today;
+		}
+
+		const defById = new Map(definitions.map((d) => [d.id, d]));
+		const byDay = new Map<string, DayGroup>();
+		let totalEvents = 0;
+
+		for (const [defId, list] of eventsByDefinition) {
+			const def = defById.get(defId);
+			if (!def) continue;
+			for (const ev of list) {
+				const evDate = new Date(ev.timestamp);
+				if (Number.isNaN(evDate.getTime())) continue;
+				const evDayStart = startOfLocalDay(evDate);
+				if (evDayStart < earliest || evDayStart > latest) continue;
+				const key = dayKey(evDayStart);
+				let group = byDay.get(key);
+				if (!group) {
+					group = { key, date: evDayStart, entries: [] };
+					byDay.set(key, group);
+				}
+				group.entries.push({ event: ev, definition: def });
+				totalEvents += 1;
+			}
+		}
+
+		const days = Array.from(byDay.values())
+			.map((g) => ({
+				...g,
+				entries: g.entries.sort((a, b) =>
+					b.event.timestamp.localeCompare(a.event.timestamp),
+				),
+			}))
+			.sort((a, b) => b.key.localeCompare(a.key));
+
+		return { days, totalEvents, earliest, latest };
+	});
+
+	const todayStart = $derived(startOfLocalDay(new Date()));
 
 	let selectedDefId: string = $state("");
 
@@ -168,6 +297,100 @@
 			<div class="lt-an__label">maintenance overdue</div>
 		</div>
 	</div>
+
+	<section class="lt-an__panel">
+		<div class="lt-an__panel-head">
+			<h3 class="lt-an__heading">Recent activity</h3>
+			<div class="lt-an__seg" role="tablist" aria-label="Activity window">
+				{#each activityWindowOptions as opt (opt.value)}
+					<button
+						type="button"
+						role="tab"
+						aria-selected={activityWindow === opt.value}
+						class="lt-an__seg-btn"
+						class:active={activityWindow === opt.value}
+						onclick={() => (activityWindow = opt.value)}
+					>
+						{opt.label}
+					</button>
+				{/each}
+			</div>
+		</div>
+
+		{#if dailyActivity.totalEvents === 0}
+			<p class="lt-an__muted">
+				{#if activityWindow === "1"}
+					Nothing logged yesterday.
+				{:else}
+					No events in this window.
+				{/if}
+			</p>
+		{:else}
+			<div class="lt-an__activity-meta">
+				{dailyActivity.totalEvents} event{dailyActivity.totalEvents === 1 ? "" : "s"}
+				across {dailyActivity.days.length} day{dailyActivity.days.length === 1 ? "" : "s"}
+			</div>
+			<div class="lt-an__days">
+				{#each dailyActivity.days as day (day.key)}
+					<div class="lt-an__day">
+						<div class="lt-an__day-head">
+							<span class="lt-an__day-label">
+								{dayLabel(day.date, todayStart)}
+							</span>
+							<span class="lt-an__day-count">
+								{day.entries.length}
+								{day.entries.length === 1 ? "entry" : "entries"}
+							</span>
+						</div>
+						<ul class="lt-an__entries">
+							{#each day.entries as entry (entry.event.id)}
+								{@const valStr = formatEventValue(
+									entry.definition,
+									entry.event,
+								)}
+								<li>
+									<button
+										type="button"
+										class="lt-an__entry"
+										onclick={() =>
+											plugin.openEventDetail(
+												entry.definition,
+												entry.event,
+											)}
+									>
+										<span class="lt-an__entry-time">
+											{eventTime(entry.event.timestamp)}
+										</span>
+										{#if entry.definition.emoji}
+											<span
+												class="lt-an__entry-emoji"
+												aria-hidden="true"
+											>
+												{entry.definition.emoji}
+											</span>
+										{/if}
+										<span class="lt-an__entry-name">
+											{entry.definition.displayName}
+										</span>
+										{#if valStr}
+											<span class="lt-an__entry-value">
+												{valStr}
+											</span>
+										{/if}
+										{#if entry.event.note}
+											<span class="lt-an__entry-note">
+												{entry.event.note}
+											</span>
+										{/if}
+									</button>
+								</li>
+							{/each}
+						</ul>
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</section>
 
 	{#if allEvents.length > 0}
 		<section class="lt-an__panel">
@@ -419,5 +642,124 @@
 	.lt-an__muted {
 		color: var(--text-muted);
 		font-size: 0.85rem;
+	}
+
+	.lt-an__seg {
+		display: inline-flex;
+		gap: 0.15rem;
+		padding: 0.15rem;
+		background: var(--background-primary);
+		border-radius: 0.35rem;
+		flex-wrap: wrap;
+	}
+	.lt-an__seg-btn {
+		padding: 0.25rem 0.55rem;
+		font-size: 0.75rem;
+		background: transparent;
+		border: none;
+		border-radius: 0.25rem;
+		color: var(--text-muted);
+		cursor: pointer;
+	}
+	.lt-an__seg-btn:hover {
+		color: var(--text-normal);
+		background: var(--background-modifier-hover);
+	}
+	.lt-an__seg-btn.active {
+		background: var(--interactive-accent);
+		color: var(--text-on-accent);
+	}
+
+	.lt-an__activity-meta {
+		font-size: 0.75rem;
+		color: var(--text-faint);
+	}
+	.lt-an__days {
+		display: flex;
+		flex-direction: column;
+		gap: 0.65rem;
+	}
+	.lt-an__day {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+	}
+	.lt-an__day-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.5rem;
+		padding: 0 0.15rem;
+	}
+	.lt-an__day-label {
+		font-size: 0.8rem;
+		font-weight: 600;
+		color: var(--text-normal);
+	}
+	.lt-an__day-count {
+		font-size: 0.7rem;
+		color: var(--text-faint);
+	}
+	.lt-an__entries {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+	}
+	.lt-an__entry {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
+		width: 100%;
+		padding: 0.3rem 0.5rem;
+		background: var(--background-primary);
+		border: 1px solid transparent;
+		border-radius: 0.3rem;
+		text-align: left;
+		font: inherit;
+		color: inherit;
+		cursor: pointer;
+	}
+	.lt-an__entry:hover {
+		background: var(--background-modifier-hover);
+	}
+	.lt-an__entry:focus-visible {
+		outline: 2px solid var(--interactive-accent);
+		outline-offset: 1px;
+	}
+	.lt-an__entry-time {
+		font-family: var(--font-monospace);
+		font-size: 0.75rem;
+		color: var(--text-muted);
+		flex-shrink: 0;
+		min-width: 3.2rem;
+	}
+	.lt-an__entry-emoji {
+		font-size: 0.95rem;
+		flex-shrink: 0;
+	}
+	.lt-an__entry-name {
+		font-size: 0.85rem;
+		font-weight: 500;
+		flex-shrink: 0;
+	}
+	.lt-an__entry-value {
+		font-size: 0.75rem;
+		color: var(--text-muted);
+		padding: 0.05rem 0.35rem;
+		background: var(--background-secondary);
+		border-radius: 0.25rem;
+		flex-shrink: 0;
+	}
+	.lt-an__entry-note {
+		font-size: 0.75rem;
+		color: var(--text-faint);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		min-width: 0;
+		flex: 1;
 	}
 </style>
