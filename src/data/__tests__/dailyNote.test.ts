@@ -10,6 +10,7 @@ import {
 	parseDailyNotePath,
 	parsePlannedBlocks,
 	parseUncheckedPlanLines,
+	removeCheckedPlanLineForLabel,
 	unmarkPlanLineCheckedForLabel,
 } from "../dailyNote";
 
@@ -793,5 +794,76 @@ describe("unmarkPlanLineCheckedForLabel", () => {
 			"Run",
 		);
 		expect(reverted.updated).toBe(content);
+	});
+});
+
+describe("removeCheckedPlanLineForLabel", () => {
+	test("deletes the matching checked line entirely", () => {
+		const content = [
+			"## Timeline",
+			"",
+			"- [x] 07:00 Run #habit",
+			"- [ ] 09:00 Stretch #habit",
+			"",
+		].join("\n");
+		const result = removeCheckedPlanLineForLabel(content, "Timeline", "Run");
+		expect(result.matched?.startTime).toBe("07:00");
+		expect(result.updated).not.toContain("- [x] 07:00 Run #habit");
+		expect(result.updated).toContain("- [ ] 09:00 Stretch #habit");
+	});
+
+	test("prefers an exact start-time match when duplicate labels exist", () => {
+		const content = [
+			"## Timeline",
+			"- [x] 07:00 Run #habit",
+			"- [x] 17:00 Run #habit",
+		].join("\n");
+		const result = removeCheckedPlanLineForLabel(
+			content,
+			"Timeline",
+			"Run",
+			"17:00",
+		);
+		expect(result.matched?.startTime).toBe("17:00");
+		expect(result.updated).toContain("- [x] 07:00 Run #habit");
+		expect(result.updated).not.toContain("- [x] 17:00 Run #habit");
+	});
+
+	test("ignores unchecked lines", () => {
+		const content = [
+			"## Timeline",
+			"- [ ] 07:00 Run #habit",
+		].join("\n");
+		const result = removeCheckedPlanLineForLabel(content, "Timeline", "Run");
+		expect(result.matched).toBeNull();
+		expect(result.updated).toBe(content);
+	});
+
+	test("returns null match when no candidate exists", () => {
+		const content = [
+			"## Timeline",
+			"- [x] 07:00 Stretch #habit",
+		].join("\n");
+		const result = removeCheckedPlanLineForLabel(content, "Timeline", "Run");
+		expect(result.matched).toBeNull();
+		expect(result.updated).toBe(content);
+	});
+
+	test("doesn't cross into the next heading", () => {
+		const content = [
+			"## Timeline",
+			"- [x] 07:00 Run #habit",
+			"## Notes",
+			"- [x] 09:00 Run #habit",
+		].join("\n");
+		const result = removeCheckedPlanLineForLabel(
+			content,
+			"Timeline",
+			"Run",
+			"09:00",
+		);
+		// Only the Timeline-section match counts; falls back to the 07:00 line.
+		expect(result.matched?.startTime).toBe("07:00");
+		expect(result.updated).toContain("## Notes\n- [x] 09:00 Run #habit");
 	});
 });

@@ -407,6 +407,78 @@ export function markPlanLineCheckedForLabel(
 }
 
 /**
+ * Find the first checked plan line under `heading` whose label matches `label`
+ * (case-insensitively) and delete it entirely. Used for undoing an
+ * auto-appended log entry, where the line didn't exist before the log and
+ * shouldn't survive the undo as a phantom unchecked entry.
+ *
+ * If `preferredTime` is provided, prefers an exact start-time match.
+ */
+export function removeCheckedPlanLineForLabel(
+	content: string,
+	heading: string,
+	label: string,
+	preferredTime?: string,
+): MarkPlanLineResult {
+	const target = label.trim().toLowerCase();
+	if (target === "") return { updated: content, matched: null };
+
+	const headingPattern = new RegExp(
+		`^##\\s+${escapeRegex(heading)}\\s*$`,
+		"m",
+	);
+	const head = content.match(headingPattern);
+	if (!head || head.index === undefined) {
+		return { updated: content, matched: null };
+	}
+
+	const sectionStart = head.index + head[0].length;
+	const remainder = content.slice(sectionStart);
+	const lines = remainder.split("\n");
+
+	type Candidate = {
+		index: number;
+		startTime: string;
+		endTime?: string;
+		lineLabel: string;
+		raw: string;
+	};
+	const candidates: Candidate[] = [];
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		if (i > 0 && HEADING_PREFIX_RE.test(line)) break;
+		const m = CHECKED_PLAN_LINE_RE.exec(line);
+		if (!m) continue;
+		const startTime = `${m[1]}:${m[2]}`;
+		const endTime = m[3] !== undefined ? `${m[3]}:${m[4]}` : undefined;
+		const lineLabel = extractPlanLabel(m[5] ?? "");
+		if (lineLabel.toLowerCase() === target) {
+			candidates.push({ index: i, startTime, endTime, lineLabel, raw: line });
+		}
+	}
+
+	if (candidates.length === 0) return { updated: content, matched: null };
+
+	const chosen =
+		(preferredTime && candidates.find((c) => c.startTime === preferredTime)) ||
+		candidates[0];
+
+	lines.splice(chosen.index, 1);
+	const updated = content.slice(0, sectionStart) + lines.join("\n");
+
+	return {
+		updated,
+		matched: {
+			startTime: chosen.startTime,
+			endTime: chosen.endTime,
+			label: chosen.lineLabel,
+			raw: chosen.raw,
+		},
+	};
+}
+
+/**
  * Inverse of `markPlanLineCheckedForLabel`: find the first checked plan line under
  * `heading` whose label matches `label` case-insensitively, and toggle `[x]` → `[ ]`.
  *

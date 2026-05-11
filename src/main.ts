@@ -1,6 +1,7 @@
 import { Notice, Plugin, TFile, type WorkspaceLeaf } from "obsidian";
 import { DataLayer } from "./data/dataLayer";
 import {
+	formatPlanLine,
 	parseCheckedPlanLines,
 	parseUncheckedPlanLines,
 } from "./data/dailyNote";
@@ -11,6 +12,7 @@ import {
 	localTimeString,
 	markPlanLineForEvent,
 	parseDailyNoteDateForApp,
+	removeAppendedPlanLine,
 	resolveDailyNoteConfig,
 	unmarkPlanLineForEvent,
 } from "./data/dailyNoteService";
@@ -43,6 +45,7 @@ interface LifeTrackerSettings {
 	quickLogIds: string[];
 	definitionOrder: Record<OrderTabKey, string[]>;
 	habitWindowMode: "calendar" | "rolling";
+	recordUnplannedEvents: boolean;
 }
 
 const DEFAULT_SETTINGS: LifeTrackerSettings = {
@@ -52,6 +55,7 @@ const DEFAULT_SETTINGS: LifeTrackerSettings = {
 	quickLogIds: [],
 	definitionOrder: { habits: [], counters: [], maintenance: [], projects: [] },
 	habitWindowMode: "calendar",
+	recordUnplannedEvents: false,
 };
 
 const RECENT_LIMIT = 20;
@@ -64,6 +68,8 @@ interface MarkedPlanInfo {
 	path: string;
 	startTime: string;
 	label: string;
+	/** True if we appended a brand-new checked line; false if we toggled an existing planned line. */
+	appended: boolean;
 }
 
 export default class LifeTrackerPlugin extends Plugin {
@@ -614,16 +620,54 @@ export default class LifeTrackerPlugin extends Plugin {
 					);
 				},
 			});
-			if (!result) return null;
-			return {
-				path: result.path,
-				startTime: result.matched.startTime,
-				label: result.matched.label,
-			};
+			if (result) {
+				return {
+					path: result.path,
+					startTime: result.matched.startTime,
+					label: result.matched.label,
+					appended: false,
+				};
+			}
+
+			if (!this.settings.recordUnplannedEvents) return null;
+			return await this.appendEventEntryToDailyNote(def, date, time);
 		} catch (err) {
 			console.warn("[life-tracker] sync event → checkbox failed:", err);
 			return null;
 		}
+	}
+
+	private async appendEventEntryToDailyNote(
+		def: Definition,
+		date: string,
+		time: string,
+	): Promise<MarkedPlanInfo | null> {
+		const planned = formatPlanLine({
+			kind: def.kind,
+			displayName: def.displayName,
+			startTime: time,
+			tags: def.tags,
+		});
+		// Already happened — emit the line pre-checked.
+		const line = planned.replace(/^(\s*-\s*)\[ \]/, "$1[x]");
+
+		// Pre-register the plan key so the modify watcher treats the resulting
+		// file change as already-processed and doesn't auto-log a duplicate.
+		const path = await addPlanLineToDailyNote({
+			app: this.app,
+			vault: this.vaultAdapter,
+			date,
+			heading: this.settings.planHeading,
+			line,
+		});
+		this.processedPlanKeys.add(planKey(path, time, def.displayName));
+
+		return {
+			path,
+			startTime: time,
+			label: def.displayName,
+			appended: true,
+		};
 	}
 
 	private async untickPlanLineForUndo(marked: MarkedPlanInfo): Promise<void> {
@@ -632,6 +676,19 @@ export default class LifeTrackerPlugin extends Plugin {
 		this.processedPlanKeys.delete(
 			planKey(marked.path, marked.startTime, marked.label),
 		);
+		if (marked.appended) {
+			// Remove the line we added — leaving it as an unchecked phantom
+			// would misrepresent the day's plan.
+			await removeAppendedPlanLine({
+				app: this.app,
+				vault: this.vaultAdapter,
+				path: marked.path,
+				heading: this.settings.planHeading,
+				label: marked.label,
+				time: marked.startTime,
+			});
+			return;
+		}
 		await unmarkPlanLineForEvent({
 			app: this.app,
 			vault: this.vaultAdapter,

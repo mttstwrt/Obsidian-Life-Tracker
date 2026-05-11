@@ -18,6 +18,7 @@ import {
 	markPlanLineCheckedForLabel,
 	parseDailyNotePath,
 	parsePlannedBlocks,
+	removeCheckedPlanLineForLabel,
 	unmarkPlanLineCheckedForLabel,
 } from "./dailyNote";
 import type { VaultAdapter } from "./vaultAdapter";
@@ -161,6 +162,39 @@ export async function markPlanLineForEvent(
 	opts.beforeWrite?.({ path, matched: result.matched });
 	await opts.vault.write(path, result.updated);
 	return { path, matched: result.matched };
+}
+
+export interface RemoveAppendedPlanLineOpts {
+	app: App;
+	vault: VaultAdapter;
+	path: string;
+	heading: string;
+	label: string;
+	time?: string;
+	beforeWrite?: (info: { path: string; matched: MarkPlanLineMatch }) => void;
+}
+
+/**
+ * Used to undo a previously-appended "auto-logged" plan line. Locates the
+ * checked line under `heading` whose label (and optionally start time) match,
+ * and deletes it entirely (so undo doesn't leave a phantom unchecked entry).
+ */
+export async function removeAppendedPlanLine(
+	opts: RemoveAppendedPlanLineOpts,
+): Promise<{ path: string; matched: MarkPlanLineMatch } | null> {
+	if (!(await opts.vault.exists(opts.path))) return null;
+	const content = await opts.vault.read(opts.path);
+	const result = removeCheckedPlanLineForLabel(
+		content,
+		opts.heading,
+		opts.label,
+		opts.time,
+	);
+	if (!result.matched || result.updated === content) return null;
+
+	opts.beforeWrite?.({ path: opts.path, matched: result.matched });
+	await opts.vault.write(opts.path, result.updated);
+	return { path: opts.path, matched: result.matched };
 }
 
 export interface UnmarkPlanLineForEventOpts {

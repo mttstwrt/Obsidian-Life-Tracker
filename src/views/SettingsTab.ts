@@ -60,6 +60,20 @@ export class LifeTrackerSettingTab extends PluginSettingTab {
 					}),
 			);
 
+		new Setting(containerEl)
+			.setName("Record unplanned events in daily note")
+			.setDesc(
+				"When on, logging an event also writes a checked entry into that day's daily note (under the plan heading) if no matching planned line exists. When off, only existing planned lines get ticked.",
+			)
+			.addToggle((t) =>
+				t
+					.setValue(this.plugin.settings.recordUnplannedEvents)
+					.onChange(async (v) => {
+						this.plugin.settings.recordUnplannedEvents = v;
+						await this.plugin.saveSettings();
+					}),
+			);
+
 		new Setting(containerEl).setName("Definitions").setHeading();
 
 		new Setting(containerEl)
