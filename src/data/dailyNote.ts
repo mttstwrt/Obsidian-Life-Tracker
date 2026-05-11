@@ -7,6 +7,21 @@ export interface PlanLineSpec {
 	startTime: string;
 	endTime?: string;
 	tags?: string[];
+	/**
+	 * If set, the line's label is wrapped in an Obsidian wikilink pointing to
+	 * this target (typically the definition's id / file basename). When the
+	 * target equals the rendered label, the alias is omitted to keep the line
+	 * compact (`[[Run]]` rather than `[[Run|Run]]`).
+	 */
+	linkTarget?: string;
+}
+
+function formatLabelMaybeLinked(label: string, linkTarget?: string): string {
+	if (!linkTarget) return label;
+	const target = linkTarget.trim();
+	if (target === "") return label;
+	if (target === label) return `[[${target}]]`;
+	return `[[${target}|${label}]]`;
 }
 
 const TAG_BY_KIND: Record<Definition["kind"], string> = {
@@ -43,10 +58,11 @@ function buildTagSuffix(kindTag: string, tags?: string[]): string {
 
 export function formatPlanLine(spec: PlanLineSpec): string {
 	const label = (spec.label ?? "").trim() || spec.displayName;
+	const rendered = formatLabelMaybeLinked(label, spec.linkTarget);
 	const tagSuffix = buildTagSuffix(TAG_BY_KIND[spec.kind], spec.tags);
 
 	if (spec.kind === "maintenance") {
-		return `- [ ] ${spec.startTime} ${label} ${tagSuffix}`;
+		return `- [ ] ${spec.startTime} ${rendered} ${tagSuffix}`;
 	}
 
 	const timeBlock = spec.endTime
@@ -54,10 +70,10 @@ export function formatPlanLine(spec: PlanLineSpec): string {
 		: spec.startTime;
 
 	if (spec.kind === "project") {
-		return `- [ ] ${timeBlock} Project: ${label} ${tagSuffix}`;
+		return `- [ ] ${timeBlock} Project: ${rendered} ${tagSuffix}`;
 	}
 
-	return `- [ ] ${timeBlock} ${label} ${tagSuffix}`;
+	return `- [ ] ${timeBlock} ${rendered} ${tagSuffix}`;
 }
 
 const HEADING_PREFIX_RE = /^#{1,6}\s/;
@@ -230,11 +246,20 @@ const TRAILING_TAGS_RE = /(?:\s+#[A-Za-z0-9_\-/]+)+\s*$/;
 const TASKS_METADATA_TRAILING_RE =
 	/\s+[\u{1F4C5}\u{2705}\u{1F6EB}\u{23F3}\u{2795}\u{274C}\u{1F501}\u{1F194}\u{26D3}\u{1F53A}\u{23EB}\u{1F53C}\u{1F53D}\u{23EC}].*$/u;
 
+const WIKILINK_RE = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+
+function unwrapWikilinks(s: string): string {
+	return s.replace(WIKILINK_RE, (_, target: string, alias?: string) =>
+		(alias ?? target).trim(),
+	);
+}
+
 export function extractPlanLabel(text: string): string {
 	let s = text.trim();
 	s = s.replace(TASKS_METADATA_TRAILING_RE, "");
 	s = s.replace(TRAILING_TAGS_RE, "");
 	s = s.replace(PROJECT_PREFIX_RE, "");
+	s = unwrapWikilinks(s);
 	return s.trim();
 }
 

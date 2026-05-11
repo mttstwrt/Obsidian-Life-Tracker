@@ -46,6 +46,7 @@ interface LifeTrackerSettings {
 	definitionOrder: Record<OrderTabKey, string[]>;
 	habitWindowMode: "calendar" | "rolling";
 	recordUnplannedEvents: boolean;
+	linkActivitiesToDefinitions: boolean;
 }
 
 const DEFAULT_SETTINGS: LifeTrackerSettings = {
@@ -56,6 +57,7 @@ const DEFAULT_SETTINGS: LifeTrackerSettings = {
 	definitionOrder: { habits: [], counters: [], maintenance: [], projects: [] },
 	habitWindowMode: "calendar",
 	recordUnplannedEvents: false,
+	linkActivitiesToDefinitions: false,
 };
 
 const RECENT_LIMIT = 20;
@@ -281,6 +283,7 @@ export default class LifeTrackerPlugin extends Plugin {
 			this.settings.recentDefinitionIds,
 			(def) => {
 				new LogEventModal(this.app, this.data, def, {
+					linkToDefinition: this.settings.linkActivitiesToDefinitions,
 					onLogged: (_id, ev, mode) =>
 						this.handleEventLogged(def, ev, mode),
 					onPlan: (planned) => this.handlePlan(def, planned),
@@ -304,6 +307,7 @@ export default class LifeTrackerPlugin extends Plugin {
 		}
 		new LogEventModal(this.app, this.data, def, {
 			initialDate: opts.initialDate,
+			linkToDefinition: this.settings.linkActivitiesToDefinitions,
 			onLogged: (_id, ev, mode) => this.handleEventLogged(def, ev, mode),
 			onPlan: (planned) => this.handlePlan(def, planned),
 			findSlot: (date, durationMin) =>
@@ -647,6 +651,7 @@ export default class LifeTrackerPlugin extends Plugin {
 			displayName: def.displayName,
 			startTime: time,
 			tags: def.tags,
+			linkTarget: this.settings.linkActivitiesToDefinitions ? def.id : undefined,
 		});
 		// Already happened — emit the line pre-checked.
 		const line = planned.replace(/^(\s*-\s*)\[ \]/, "$1[x]");

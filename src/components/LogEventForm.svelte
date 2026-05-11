@@ -24,6 +24,7 @@
 		existingEvent,
 		initialDate: initialDateProp,
 		initialTime: initialTimeProp,
+		linkToDefinition = false,
 		onSubmit,
 		onPlan,
 		findSlot,
@@ -34,6 +35,7 @@
 		existingEvent?: TrackerEvent;
 		initialDate?: string;
 		initialTime?: string;
+		linkToDefinition?: boolean;
 		onSubmit: (
 			submitted: Submitted,
 		) => Promise<void> | void;
@@ -259,6 +261,7 @@
 			startTime: planStart,
 			endTime: planEnd,
 			label: planLabel,
+			linkToDefinition,
 		});
 
 		if (!result.ok) {

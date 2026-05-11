@@ -6,6 +6,9 @@ export interface PlanFormInput {
 	startTime: string;
 	endTime: string;
 	label: string;
+	/** When true, the emitted line wraps its label in an Obsidian wikilink
+	 *  to the definition (target = `def.id`). */
+	linkToDefinition?: boolean;
 }
 
 export interface PlanFormSuccess {
@@ -54,6 +57,7 @@ export function buildPlanLine(
 		startTime: input.startTime,
 		endTime: end || undefined,
 		tags: def.tags,
+		linkTarget: input.linkToDefinition ? def.id : undefined,
 	});
 
 	return { ok: true, date: input.date, line };

@@ -12,6 +12,7 @@ export interface LogEventModalOpts {
 	mode?: LogMode;
 	existingEvent?: Event;
 	initialDate?: string;
+	linkToDefinition?: boolean;
 	onLogged?: (
 		definitionId: string,
 		event: Event,
@@ -26,6 +27,7 @@ export class LogEventModal extends Modal {
 	private mode: LogMode;
 	private existingEvent?: Event;
 	private initialDate?: string;
+	private linkToDefinition: boolean;
 	private onLogged?: (
 		definitionId: string,
 		event: Event,
@@ -47,6 +49,7 @@ export class LogEventModal extends Modal {
 		this.mode = opts.mode ?? "create";
 		this.existingEvent = opts.existingEvent;
 		this.initialDate = opts.initialDate;
+		this.linkToDefinition = opts.linkToDefinition ?? false;
 		this.onLogged = opts.onLogged;
 		this.onPlan = opts.onPlan;
 		this.findSlot = opts.findSlot;
@@ -66,6 +69,7 @@ export class LogEventModal extends Modal {
 				mode: this.mode,
 				existingEvent: this.existingEvent,
 				initialDate: this.initialDate,
+				linkToDefinition: this.linkToDefinition,
 				findSlot: this.findSlot,
 				onPlan: this.onPlan
 					? async (planned: PlanFormSuccess) => {

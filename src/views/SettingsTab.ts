@@ -74,6 +74,20 @@ export class LifeTrackerSettingTab extends PluginSettingTab {
 					}),
 			);
 
+		new Setting(containerEl)
+			.setName("Link activities to their definitions")
+			.setDesc(
+				"When on, planned and auto-recorded entries write their label as an Obsidian wikilink to the definition file (e.g. `[[running|Run]]`). Existing entries in daily notes aren't rewritten.",
+			)
+			.addToggle((t) =>
+				t
+					.setValue(this.plugin.settings.linkActivitiesToDefinitions)
+					.onChange(async (v) => {
+						this.plugin.settings.linkActivitiesToDefinitions = v;
+						await this.plugin.saveSettings();
+					}),
+			);
+
 		new Setting(containerEl).setName("Definitions").setHeading();
 
 		new Setting(containerEl)

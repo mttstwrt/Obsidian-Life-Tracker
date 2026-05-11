@@ -139,6 +139,54 @@ describe("formatPlanLine", () => {
 			}),
 		).toBe("- [ ] 07:00 Run #habit #cardio");
 	});
+
+	test("linkTarget wraps the label in a piped wikilink", () => {
+		expect(
+			formatPlanLine({
+				kind: "habit",
+				displayName: "Run",
+				startTime: "07:00",
+				linkTarget: "running",
+			}),
+		).toBe("- [ ] 07:00 [[running|Run]] #habit");
+	});
+
+	test("linkTarget collapses to a bare wikilink when target equals label", () => {
+		expect(
+			formatPlanLine({
+				kind: "habit",
+				displayName: "Run",
+				startTime: "07:00",
+				linkTarget: "Run",
+			}),
+		).toBe("- [ ] 07:00 [[Run]] #habit");
+	});
+
+	test("linkTarget composes with Project: prefix", () => {
+		expect(
+			formatPlanLine({
+				kind: "project",
+				displayName: "Obsidian Plugin",
+				label: "wire plan tab",
+				startTime: "19:00",
+				endTime: "20:30",
+				linkTarget: "obsidian-plugin",
+			}),
+		).toBe(
+			"- [ ] 19:00 - 20:30 Project: [[obsidian-plugin|wire plan tab]] #work",
+		);
+	});
+
+	test("blank linkTarget is treated as no link", () => {
+		expect(
+			formatPlanLine({
+				kind: "habit",
+				displayName: "Run",
+				startTime: "07:00",
+				linkTarget: "   ",
+			}),
+		).toBe("- [ ] 07:00 Run #habit");
+	});
 });
 
 describe("insertUnderHeading", () => {
@@ -430,6 +478,20 @@ describe("extractPlanLabel", () => {
 			"Wash sheets",
 		);
 	});
+
+	test("unwraps a piped wikilink to its alias", () => {
+		expect(extractPlanLabel("[[running|Run]] #habit")).toBe("Run");
+	});
+
+	test("unwraps a bare wikilink to its target", () => {
+		expect(extractPlanLabel("[[Run]] #habit")).toBe("Run");
+	});
+
+	test("unwraps wikilink under Project: prefix", () => {
+		expect(extractPlanLabel("Project: [[obsidian-plugin|Wire UI]] #work")).toBe(
+			"Wire UI",
+		);
+	});
 });
 
 describe("parseDailyNotePath", () => {
@@ -675,6 +737,16 @@ describe("markPlanLineCheckedForLabel", () => {
 		// Notes must not be touched.
 		expect(result.matched?.startTime).toBe("07:00");
 		expect(result.updated).toContain("## Notes\n- [ ] 08:00 Run #habit");
+	});
+
+	test("matches a wikilinked label by its display alias", () => {
+		const content = ["## Timeline", "- [ ] 07:00 [[running|Run]] #habit"].join(
+			"\n",
+		);
+		const result = markPlanLineCheckedForLabel(content, "Timeline", "Run");
+		expect(result.matched?.startTime).toBe("07:00");
+		expect(result.matched?.label).toBe("Run");
+		expect(result.updated).toContain("- [x] 07:00 [[running|Run]] #habit");
 	});
 });
 
