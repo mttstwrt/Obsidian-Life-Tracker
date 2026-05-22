@@ -23,6 +23,13 @@ import {
 } from "./dailyNote";
 import type { VaultAdapter } from "./vaultAdapter";
 
+export function resolveDailyNotePathForApp(app: App, date: string): string {
+	const config = resolveDailyNoteConfig(app);
+	return dailyNotePath(date, config, (d, f) =>
+		moment(d, "YYYY-MM-DD").format(f),
+	);
+}
+
 export function resolveDailyNoteConfig(app: App): DailyNoteConfig {
 	const internal = (
 		app as unknown as {

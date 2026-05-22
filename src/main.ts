@@ -14,6 +14,7 @@ import {
 	parseDailyNoteDateForApp,
 	removeAppendedPlanLine,
 	resolveDailyNoteConfig,
+	resolveDailyNotePathForApp,
 	unmarkPlanLineForEvent,
 } from "./data/dailyNoteService";
 import type { PlanFormSuccess } from "./data/planForm";
@@ -56,7 +57,7 @@ const DEFAULT_SETTINGS: LifeTrackerSettings = {
 	quickLogIds: [],
 	definitionOrder: { habits: [], counters: [], maintenance: [], projects: [] },
 	habitWindowMode: "calendar",
-	recordUnplannedEvents: false,
+	recordUnplannedEvents: true,
 	linkActivitiesToDefinitions: false,
 };
 
@@ -656,16 +657,18 @@ export default class LifeTrackerPlugin extends Plugin {
 		// Already happened — emit the line pre-checked.
 		const line = planned.replace(/^(\s*-\s*)\[ \]/, "$1[x]");
 
-		// Pre-register the plan key so the modify watcher treats the resulting
-		// file change as already-processed and doesn't auto-log a duplicate.
-		const path = await addPlanLineToDailyNote({
+		// Pre-register the plan key BEFORE the write so the modify watcher
+		// treats the resulting file change as already-processed and doesn't
+		// auto-log a duplicate.
+		const path = resolveDailyNotePathForApp(this.app, date);
+		this.processedPlanKeys.add(planKey(path, time, def.displayName));
+		await addPlanLineToDailyNote({
 			app: this.app,
 			vault: this.vaultAdapter,
 			date,
 			heading: this.settings.planHeading,
 			line,
 		});
-		this.processedPlanKeys.add(planKey(path, time, def.displayName));
 
 		return {
 			path,
