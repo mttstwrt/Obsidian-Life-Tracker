@@ -305,6 +305,91 @@ export function toneColor(t: number): string {
 	return `color-mix(in oklch, var(--text-warning), ${success} ${pct}%)`;
 }
 
+export interface EventContextStats {
+	/** Valid events for the definition. */
+	total: number;
+	/** 1-based chronological position of the current event; 0 if not found. */
+	index: number;
+	firstTimestamp: string | null;
+	lastTimestamp: string | null;
+	/** Whole days from the previous event to this one; null if it's the first. */
+	sincePrevDays: number | null;
+	/** Whole days from this event to the next; null if it's the most recent. */
+	untilNextDays: number | null;
+	/** Mean days between consecutive events; null if fewer than two events. */
+	avgGapDays: number | null;
+	/** Events in the trailing 30 days ending today. */
+	last30: number;
+}
+
+/**
+ * Summarizes where one event sits within its definition's history: chronological
+ * position, the gaps on either side, the typical cadence, and recent frequency.
+ * Day-aligned (local) so gaps read as whole days the way a habit tracker expects.
+ */
+export function eventContextStats(
+	events: Event[],
+	currentId: string,
+	now: Date,
+): EventContextStats {
+	const sorted = events
+		.filter((e) => !Number.isNaN(new Date(e.timestamp).getTime()))
+		.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+	const total = sorted.length;
+	if (total === 0) {
+		return {
+			total: 0,
+			index: 0,
+			firstTimestamp: null,
+			lastTimestamp: null,
+			sincePrevDays: null,
+			untilNextDays: null,
+			avgGapDays: null,
+			last30: 0,
+		};
+	}
+
+	const dayMs = (ts: string) => startOfDay(new Date(ts)).getTime();
+	const idx0 = sorted.findIndex((e) => e.id === currentId);
+
+	let sincePrevDays: number | null = null;
+	if (idx0 > 0) {
+		sincePrevDays = Math.round(
+			(dayMs(sorted[idx0].timestamp) - dayMs(sorted[idx0 - 1].timestamp)) /
+				MS_PER_DAY,
+		);
+	}
+	let untilNextDays: number | null = null;
+	if (idx0 >= 0 && idx0 < total - 1) {
+		untilNextDays = Math.round(
+			(dayMs(sorted[idx0 + 1].timestamp) - dayMs(sorted[idx0].timestamp)) /
+				MS_PER_DAY,
+		);
+	}
+
+	let avgGapDays: number | null = null;
+	if (total >= 2) {
+		const span =
+			dayMs(sorted[total - 1].timestamp) - dayMs(sorted[0].timestamp);
+		avgGapDays = Math.round((span / (total - 1) / MS_PER_DAY) * 10) / 10;
+	}
+
+	const cutoff = startOfDay(now).getTime() - 29 * MS_PER_DAY;
+	let last30 = 0;
+	for (const e of sorted) if (dayMs(e.timestamp) >= cutoff) last30++;
+
+	return {
+		total,
+		index: idx0 >= 0 ? idx0 + 1 : 0,
+		firstTimestamp: sorted[0].timestamp,
+		lastTimestamp: sorted[total - 1].timestamp,
+		sincePrevDays,
+		untilNextDays,
+		avgGapDays,
+		last30,
+	};
+}
+
 export interface MaintenanceTimelineMark {
 	date: string;
 	x: number;

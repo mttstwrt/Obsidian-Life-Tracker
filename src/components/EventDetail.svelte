@@ -4,7 +4,9 @@
 		Event as TrackerEvent,
 		FieldDef,
 	} from "../data/types";
+	import { eventContextStats } from "../data/visualizations";
 	import FieldChart from "./charts/FieldChart.svelte";
+	import EventTimeline from "./charts/EventTimeline.svelte";
 
 	let {
 		definition,
@@ -32,6 +34,28 @@
 	);
 
 	const hasContext = $derived(definitionEvents.length > 1);
+
+	const now = new Date();
+	const stats = $derived(
+		eventContextStats(definitionEvents, event.id, now),
+	);
+
+	function gapLabel(days: number | null): string {
+		if (days === null) return "—";
+		if (days === 0) return "same day";
+		return `${days}d`;
+	}
+
+	function shortDate(ts: string | null): string {
+		if (!ts) return "—";
+		const d = new Date(ts);
+		if (Number.isNaN(d.getTime())) return ts;
+		return d.toLocaleDateString(undefined, {
+			month: "short",
+			day: "numeric",
+			year: "numeric",
+		});
+	}
 
 	let confirming = $state(false);
 	let working = $state(false);
@@ -164,6 +188,47 @@
 		</section>
 	{/if}
 
+	<section class="lt-detail__history">
+		<h3>History</h3>
+		{#if hasContext}
+			<EventTimeline
+				events={definitionEvents}
+				{now}
+				highlightId={event.id}
+			/>
+		{/if}
+		<dl class="lt-detail__stats">
+			<div class="lt-detail__stat">
+				<dt>Event</dt>
+				<dd>{stats.index || "?"} of {stats.total}</dd>
+			</div>
+			<div class="lt-detail__stat">
+				<dt>Since previous</dt>
+				<dd>{gapLabel(stats.sincePrevDays)}</dd>
+			</div>
+			<div class="lt-detail__stat">
+				<dt>Until next</dt>
+				<dd>{gapLabel(stats.untilNextDays)}</dd>
+			</div>
+			{#if stats.avgGapDays !== null}
+				<div class="lt-detail__stat">
+					<dt>Typical gap</dt>
+					<dd>~{stats.avgGapDays}d</dd>
+				</div>
+			{/if}
+			<div class="lt-detail__stat">
+				<dt>Last 30 days</dt>
+				<dd>{stats.last30}</dd>
+			</div>
+			{#if hasContext}
+				<div class="lt-detail__stat">
+					<dt>Span</dt>
+					<dd>{shortDate(stats.firstTimestamp)} → {shortDate(stats.lastTimestamp)}</dd>
+				</div>
+			{/if}
+		</dl>
+	</section>
+
 	{#if hasContext && chartableFields.length > 0}
 		<section class="lt-detail__charts">
 			<h3>Across all events</h3>
@@ -279,6 +344,46 @@
 	.lt-detail__danger {
 		color: var(--text-on-accent);
 		background: var(--background-modifier-error);
+	}
+	.lt-detail__history {
+		margin-top: 0.25rem;
+		padding-top: 0.5rem;
+		border-top: 1px solid var(--background-modifier-border);
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.lt-detail__history h3 {
+		font-size: 0.85rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--text-faint);
+		margin: 0;
+	}
+	.lt-detail__stats {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+		gap: 0.4rem;
+		margin: 0;
+	}
+	.lt-detail__stat {
+		background: var(--background-secondary);
+		border-radius: 0.35rem;
+		padding: 0.35rem 0.5rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+	}
+	.lt-detail__stat dt {
+		font-size: 0.65rem;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		color: var(--text-faint);
+	}
+	.lt-detail__stat dd {
+		margin: 0;
+		font-size: 0.9rem;
+		font-weight: 600;
 	}
 	.lt-detail__charts {
 		margin-top: 0.25rem;

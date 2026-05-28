@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { aggregateTagTimeline } from "../tagTimeline";
+import {
+	aggregateTagTimeline,
+	tagColor,
+	tagCoOccurrences,
+} from "../tagTimeline";
 import type { Definition, Event } from "../types";
 
 function habit(id: string, tags: string[]): Definition {
@@ -46,6 +50,7 @@ describe("aggregateTagTimeline", () => {
 		expect(cardio.definitionCount).toBe(1);
 		expect(cardio.maxDayCount).toBe(2);
 		expect(cardio.lastActive).toBe("2026-05-20");
+		expect(cardio.lastActiveDaysAgo).toBe(0);
 		expect(cardio.days.map((d) => ({ date: d.date, count: d.count }))).toEqual([
 			{ date: "2026-05-19", count: 2 },
 			{ date: "2026-05-20", count: 1 },
@@ -70,15 +75,21 @@ describe("aggregateTagTimeline", () => {
 		expect(day.events).toHaveLength(2);
 		// Earlier timestamp first.
 		expect(day.events[0]).toMatchObject({
+			definitionId: "bike",
 			definitionName: "Cycling",
 			time: "07:00",
 		});
 		expect(day.events[1]).toMatchObject({
+			definitionId: "run",
 			definitionName: "Running",
 			emoji: "🏃",
 			note: "evening jog",
 			time: "18:00",
 		});
+		// eventId round-trips so the view can resolve the real Event.
+		expect(day.events[1].eventId).toBe(
+			new Date(2026, 4, 19, 18).toISOString(),
+		);
 	});
 
 	test("merges multiple definitions sharing a tag and counts them", () => {
@@ -164,5 +175,113 @@ describe("aggregateTagTimeline", () => {
 		expect(xs[0]).toBeCloseTo(0, 5); // 7 days ago == window start
 		expect(xs[1]).toBeGreaterThan(xs[0]);
 		expect(xs[1]).toBeLessThan(100);
+	});
+
+	test("lastActiveDaysAgo counts whole days back from today", () => {
+		const defs = [habit("run", ["cardio"])];
+		const events = new Map<string, Event[]>([
+			["run", [ev(new Date(2026, 4, 17, 7).toISOString())]], // 3 days before 05-20
+		]);
+		const [t] = aggregateTagTimeline(defs, events, NOW, 30);
+		expect(t.lastActiveDaysAgo).toBe(3);
+	});
+
+	test("weeklyCounts spans the window and sums to total", () => {
+		const defs = [habit("run", ["cardio"])];
+		const events = new Map<string, Event[]>([
+			[
+				"run",
+				[
+					ev(new Date(2026, 3, 21, 7).toISOString()), // window start (30d)
+					ev(new Date(2026, 4, 20, 7).toISOString()), // today
+					ev(new Date(2026, 4, 20, 9).toISOString()),
+				],
+			],
+		]);
+		const [t] = aggregateTagTimeline(defs, events, NOW, 30);
+		expect(t.weeklyCounts).toHaveLength(Math.ceil(30 / 7));
+		expect(t.weeklyCounts.reduce((s, n) => s + n, 0)).toBe(t.total);
+		expect(t.weeklyCounts[0]).toBeGreaterThan(0); // oldest bucket
+		expect(t.weeklyCounts[t.weeklyCounts.length - 1]).toBe(2); // today bucket
+	});
+
+	test("trend reflects recent-half vs earlier-half activity", () => {
+		const mk = (dates: Date[]) =>
+			new Map<string, Event[]>([
+				["run", dates.map((d) => ev(d.toISOString()))],
+			]);
+		const apr = (d: number) => new Date(2026, 3, d, 7); // April = earlier half
+		const may = (d: number) => new Date(2026, 4, d, 7); // May = recent half
+		const defs = [habit("run", ["cardio"])];
+		// window 30d ending 05-20 → mid ≈ 05-06.
+		const up = aggregateTagTimeline(defs, mk([apr(25), may(18), may(19)]), NOW, 30);
+		expect(up[0].trend).toBe("up");
+
+		const down = aggregateTagTimeline(defs, mk([apr(25), apr(26), may(18)]), NOW, 30);
+		expect(down[0].trend).toBe("down");
+
+		const flat = aggregateTagTimeline(defs, mk([apr(25), may(18)]), NOW, 30);
+		expect(flat[0].trend).toBe("flat");
+	});
+});
+
+describe("tagColor", () => {
+	test("is stable per tag and formatted as oklch", () => {
+		expect(tagColor("cardio")).toBe(tagColor("cardio"));
+		expect(tagColor("cardio")).toMatch(/^oklch\(/);
+	});
+
+	test("different tags generally get different hues", () => {
+		expect(tagColor("cardio")).not.toBe(tagColor("work"));
+	});
+});
+
+describe("tagCoOccurrences", () => {
+	test("finds tags active on the same days, ranked by overlap", () => {
+		const run = habit("run", ["cardio", "outdoor"]);
+		const yoga = habit("yoga", ["calm"]);
+		const events = new Map<string, Event[]>([
+			[
+				"run",
+				[
+					ev(new Date(2026, 4, 10, 7).toISOString()),
+					ev(new Date(2026, 4, 11, 7).toISOString()),
+				],
+			],
+			[
+				"yoga",
+				[
+					ev(new Date(2026, 4, 11, 8).toISOString()),
+					ev(new Date(2026, 4, 12, 8).toISOString()),
+				],
+			],
+		]);
+		const tracks = aggregateTagTimeline([run, yoga], events, NOW, 30);
+		const pairs = tagCoOccurrences(tracks);
+
+		// cardio & outdoor share every day (same definition) → strongest.
+		expect(pairs[0].sharedDays).toBe(2);
+		expect([pairs[0].a, pairs[0].b].sort()).toEqual(["cardio", "outdoor"]);
+		expect(pairs[0].jaccard).toBeCloseTo(1, 5);
+
+		// cardio & calm overlap on one day → jaccard 1/3.
+		const cardioCalm = pairs.find(
+			(p) =>
+				[p.a, p.b].includes("cardio") && [p.a, p.b].includes("calm"),
+		);
+		expect(cardioCalm?.sharedDays).toBe(1);
+		expect(cardioCalm?.jaccard).toBeCloseTo(1 / 3, 5);
+	});
+
+	test("respects the minShared floor", () => {
+		const run = habit("run", ["cardio"]);
+		const yoga = habit("yoga", ["calm"]);
+		const events = new Map<string, Event[]>([
+			["run", [ev(new Date(2026, 4, 10, 7).toISOString())]],
+			["yoga", [ev(new Date(2026, 4, 12, 8).toISOString())]],
+		]);
+		const tracks = aggregateTagTimeline([run, yoga], events, NOW, 30);
+		// No shared day → no pairs at the default floor of 1.
+		expect(tagCoOccurrences(tracks)).toHaveLength(0);
 	});
 });

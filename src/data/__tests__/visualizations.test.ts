@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	buildHeatmapBuckets,
 	dateRange,
+	eventContextStats,
 	eventsByDate,
 	eventsByDayOfWeek,
 	eventsByWeek,
@@ -328,5 +329,69 @@ describe("maintenanceTimeline", () => {
 		];
 		const marks = maintenanceTimeline(events, now, 14, 30);
 		expect(marks.length).toBe(1);
+	});
+});
+
+describe("eventContextStats", () => {
+	const NOW = new Date(2026, 4, 20, 12); // 2026-05-20
+	const events = [
+		ev(new Date(2026, 4, 1, 8).toISOString()),
+		ev(new Date(2026, 4, 10, 8).toISOString()),
+		ev(new Date(2026, 4, 14, 8).toISOString()),
+		ev(new Date(2026, 4, 20, 8).toISOString()),
+	];
+
+	test("positions a middle event with both gaps", () => {
+		const s = eventContextStats(events, events[1].id, NOW);
+		expect(s.total).toBe(4);
+		expect(s.index).toBe(2);
+		expect(s.sincePrevDays).toBe(9); // May 1 -> May 10
+		expect(s.untilNextDays).toBe(4); // May 10 -> May 14
+		expect(s.avgGapDays).toBe(6.3); // span 19d over 3 gaps, rounded to 0.1
+		expect(s.last30).toBe(4);
+		expect(s.firstTimestamp).toBe(events[0].timestamp);
+		expect(s.lastTimestamp).toBe(events[3].timestamp);
+	});
+
+	test("first event has no previous gap", () => {
+		const s = eventContextStats(events, events[0].id, NOW);
+		expect(s.index).toBe(1);
+		expect(s.sincePrevDays).toBeNull();
+		expect(s.untilNextDays).toBe(9);
+	});
+
+	test("most recent event has no next gap", () => {
+		const s = eventContextStats(events, events[3].id, NOW);
+		expect(s.index).toBe(4);
+		expect(s.untilNextDays).toBeNull();
+		expect(s.sincePrevDays).toBe(6); // May 14 -> May 20
+	});
+
+	test("single event has no gaps or average", () => {
+		const one = [ev(new Date(2026, 4, 18, 8).toISOString())];
+		const s = eventContextStats(one, one[0].id, NOW);
+		expect(s.total).toBe(1);
+		expect(s.index).toBe(1);
+		expect(s.sincePrevDays).toBeNull();
+		expect(s.untilNextDays).toBeNull();
+		expect(s.avgGapDays).toBeNull();
+		expect(s.last30).toBe(1);
+	});
+
+	test("last30 excludes events older than the trailing window", () => {
+		const mixed = [
+			ev(new Date(2026, 2, 1, 8).toISOString()), // March 1 — outside 30d
+			ev(new Date(2026, 4, 19, 8).toISOString()), // yesterday
+		];
+		const s = eventContextStats(mixed, mixed[1].id, NOW);
+		expect(s.total).toBe(2);
+		expect(s.last30).toBe(1);
+	});
+
+	test("ignores invalid timestamps", () => {
+		const withBad = [ev("nope"), ev(new Date(2026, 4, 19, 8).toISOString())];
+		const s = eventContextStats(withBad, withBad[1].id, NOW);
+		expect(s.total).toBe(1);
+		expect(s.index).toBe(1);
 	});
 });

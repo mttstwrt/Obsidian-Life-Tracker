@@ -172,7 +172,7 @@
 					{now}
 				/>
 			{:else if activeTab === "tags"}
-				<DashboardTags {definitions} {eventsByDefinition} {now} />
+				<DashboardTags {definitions} {eventsByDefinition} {now} {plugin} />
 			{:else if activeTab === "analytics"}
 				<DashboardAnalytics
 					{summaries}

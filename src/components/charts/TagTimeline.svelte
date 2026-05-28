@@ -1,15 +1,27 @@
 <script lang="ts">
 	import { startOfDay } from "../../data/dashboard";
-	import type { TagDayBucket, TagTrack } from "../../data/tagTimeline";
+	import {
+		type TagDayBucket,
+		type TagTrack,
+		type TagTrend,
+		tagColor,
+	} from "../../data/tagTimeline";
+	import Sparkline from "./Sparkline.svelte";
 
 	let {
 		tracks,
 		now,
 		windowDays,
+		selectedTag = null,
+		onTagClick,
+		onMarkClick,
 	}: {
 		tracks: TagTrack[];
 		now: Date;
 		windowDays: number;
+		selectedTag?: string | null;
+		onTagClick?: (tag: string) => void;
+		onMarkClick?: (day: TagDayBucket, event: MouseEvent) => void;
 	} = $props();
 
 	const MS_PER_DAY = 86_400_000;
@@ -95,6 +107,31 @@
 		return 0.4 + 0.6 * (count / max);
 	}
 
+	function recencyLabel(daysAgo: number | null): string {
+		if (daysAgo === null) return "—";
+		if (daysAgo <= 0) return "today";
+		if (daysAgo === 1) return "1d ago";
+		return `${daysAgo}d ago`;
+	}
+
+	const TREND_SYMBOL: Record<TagTrend, string> = {
+		up: "▲",
+		down: "▼",
+		flat: "▬",
+	};
+
+	function trendColor(trend: TagTrend): string {
+		if (trend === "up") return "var(--text-success, var(--interactive-accent))";
+		if (trend === "down") return "var(--text-error)";
+		return "var(--text-faint)";
+	}
+
+	function trendLabel(trend: TagTrend): string {
+		if (trend === "up") return "trending up";
+		if (trend === "down") return "trending down";
+		return "steady";
+	}
+
 	const MAX_TITLE_EVENTS = 12;
 
 	function markTitle(day: TagDayBucket): string {
@@ -131,33 +168,85 @@
 				{/if}
 			{/each}
 		</div>
+		<div class="lt-tt__summary-head">recent · trend</div>
 	</div>
 
 	{#each tracks as track (track.tag)}
+		{@const color = tagColor(track.tag)}
 		<div class="lt-tt__row">
-			<div class="lt-tt__label" title={track.tag}>
-				<span class="lt-tt__tag">#{track.tag}</span>
+			<button
+				type="button"
+				class="lt-tt__label"
+				class:active={selectedTag === track.tag}
+				class:clickable={!!onTagClick}
+				disabled={!onTagClick}
+				aria-pressed={selectedTag === track.tag}
+				title={onTagClick
+					? selectedTag === track.tag
+						? `Clear filter (#${track.tag})`
+						: `Filter to #${track.tag}`
+					: track.tag}
+				onclick={() => onTagClick?.(track.tag)}
+			>
+				<span class="lt-tt__tagline">
+					<span
+						class="lt-tt__dot"
+						style:background={color}
+						aria-hidden="true"
+					></span>
+					<span class="lt-tt__tag">#{track.tag}</span>
+				</span>
 				<span class="lt-tt__meta">
 					{track.total}
 					{#if track.definitionCount > 1}
 						· {track.definitionCount} defs
 					{/if}
 				</span>
-			</div>
+			</button>
 			<div class="lt-tt__lane" role="img" aria-label="{track.tag}: {track.total} events">
 				<div class="lt-tt__baseline"></div>
 				{#each ticks as t, i (i)}
 					<span class="lt-tt__gridline" style:left="{t.x}%"></span>
 				{/each}
 				{#each track.days as day (day.date)}
-					<span
+					<button
+						type="button"
 						class="lt-tt__mark"
+						class:clickable={!!onMarkClick}
+						disabled={!onMarkClick}
 						style:left="{day.x}%"
+						style:background={color}
 						style:opacity={markOpacity(day.count, track.maxDayCount)}
 						title={markTitle(day)}
-					></span>
+						aria-label={markTitle(day)}
+						onclick={(e) => onMarkClick?.(day, e)}
+					></button>
 				{/each}
 				<span class="lt-tt__now" title="today"></span>
+			</div>
+			<div class="lt-tt__summary">
+				<span class="lt-tt__spark">
+					<Sparkline
+						values={track.weeklyCounts}
+						width={56}
+						height={18}
+						stroke={color}
+						title="{track.tag} weekly activity"
+					/>
+				</span>
+				<span class="lt-tt__summary-meta">
+					<span class="lt-tt__recency">
+						{recencyLabel(track.lastActiveDaysAgo)}
+					</span>
+					<span
+						class="lt-tt__trend"
+						style:color={trendColor(track.trend)}
+						title={trendLabel(track.trend)}
+						aria-label={trendLabel(track.trend)}
+					>
+						{TREND_SYMBOL[track.trend]}
+					</span>
+				</span>
 			</div>
 		</div>
 	{/each}
@@ -166,6 +255,7 @@
 <style>
 	.lt-tt {
 		--lt-tt-label-w: 9rem;
+		--lt-tt-summary-w: 6.5rem;
 		display: flex;
 		flex-direction: column;
 		gap: 0.2rem;
@@ -174,12 +264,20 @@
 	.lt-tt__axis-row,
 	.lt-tt__row {
 		display: grid;
-		grid-template-columns: var(--lt-tt-label-w) 1fr;
+		grid-template-columns: var(--lt-tt-label-w) 1fr var(--lt-tt-summary-w);
 		align-items: center;
 		gap: 0.5rem;
 	}
 	.lt-tt__axis-spacer {
 		min-width: 0;
+	}
+	.lt-tt__summary-head {
+		font-size: 0.6rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--text-faint);
+		text-align: center;
+		white-space: nowrap;
 	}
 	.lt-tt__axis {
 		position: relative;
@@ -221,6 +319,40 @@
 		flex-direction: column;
 		min-width: 0;
 		line-height: 1.15;
+		text-align: left;
+		background: transparent;
+		border: 1px solid transparent;
+		border-radius: 0.3rem;
+		padding: 0.15rem 0.3rem;
+		margin: 0;
+		color: inherit;
+		font: inherit;
+	}
+	.lt-tt__label.clickable {
+		cursor: pointer;
+	}
+	.lt-tt__label.clickable:hover {
+		background: var(--background-modifier-hover);
+	}
+	.lt-tt__label.active {
+		background: var(--background-modifier-active-hover);
+		border-color: var(--background-modifier-border);
+	}
+	.lt-tt__label:focus-visible {
+		outline: 2px solid var(--interactive-accent);
+		outline-offset: 1px;
+	}
+	.lt-tt__tagline {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		min-width: 0;
+	}
+	.lt-tt__dot {
+		width: 0.6rem;
+		height: 0.6rem;
+		border-radius: 50%;
+		flex-shrink: 0;
 	}
 	.lt-tt__tag {
 		font-weight: 600;
@@ -258,9 +390,24 @@
 		top: 3px;
 		bottom: 3px;
 		width: 3px;
+		padding: 0;
+		border: none;
 		border-radius: 1.5px;
 		background: var(--interactive-accent);
 		transform: translateX(-1.5px);
+	}
+	.lt-tt__mark.clickable {
+		cursor: pointer;
+	}
+	.lt-tt__mark.clickable:hover {
+		width: 5px;
+		transform: translateX(-2.5px);
+		opacity: 1 !important;
+	}
+	.lt-tt__mark:focus-visible {
+		outline: 2px solid var(--interactive-accent);
+		outline-offset: 1px;
+		opacity: 1 !important;
 	}
 	.lt-tt__now {
 		position: absolute;
@@ -271,9 +418,39 @@
 		background: var(--text-normal);
 		opacity: 0.45;
 	}
+	.lt-tt__summary {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		justify-content: flex-end;
+	}
+	.lt-tt__spark {
+		display: inline-flex;
+		opacity: 0.85;
+	}
+	.lt-tt__summary-meta {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		line-height: 1.1;
+	}
+	.lt-tt__recency {
+		font-size: 0.62rem;
+		color: var(--text-faint);
+		white-space: nowrap;
+	}
+	.lt-tt__trend {
+		font-size: 0.7rem;
+		line-height: 1;
+	}
 	@media (max-width: 600px) {
 		.lt-tt {
 			--lt-tt-label-w: 6rem;
+			--lt-tt-summary-w: 3rem;
+		}
+		.lt-tt__spark,
+		.lt-tt__summary-head {
+			display: none;
 		}
 	}
 </style>
