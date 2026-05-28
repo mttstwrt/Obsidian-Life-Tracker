@@ -2,12 +2,12 @@
   "rootFolder": "LifeTracker",
   "planHeading": "Timeline",
   "recentDefinitionIds": [
-    "wash-sheets",
-    "running",
+    "obsidian-plugin",
     "lifting",
+    "running",
+    "wash-sheets",
     "days-without-doomscrolling",
-    "books-2026",
-    "obsidian-plugin"
+    "books-2026"
   ],
   "quickLogIds": [],
   "definitionOrder": {
@@ -21,5 +21,7 @@
     "maintenance": [],
     "projects": []
   },
-  "habitWindowMode": "calendar"
+  "habitWindowMode": "calendar",
+  "recordUnplannedEvents": true,
+  "linkActivitiesToDefinitions": true
 }
