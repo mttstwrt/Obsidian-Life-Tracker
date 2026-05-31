@@ -17,8 +17,21 @@ const FIXTURES_DIR = join(
 describe("seeded example data", () => {
 	const files = readdirSync(FIXTURES_DIR).filter((f) => f.endsWith(".md"));
 
-	test("there are five example definitions, one per kind", () => {
-		expect(files.length).toBe(5);
+	test("example definitions cover every kind", () => {
+		const kinds = new Set<string>();
+		for (const file of files) {
+			const content = readFileSync(join(FIXTURES_DIR, file), "utf8");
+			const parsed = parseDefinitionFile(content);
+			if (!parsed.ok) throw new Error(`${file}: ${parsed.error}`);
+			kinds.add(parsed.definition.kind);
+		}
+		expect([...kinds].sort()).toEqual([
+			"counter",
+			"habit",
+			"maintenance",
+			"project",
+			"reverse-habit",
+		]);
 	});
 
 	for (const file of files) {
