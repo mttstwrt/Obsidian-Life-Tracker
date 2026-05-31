@@ -1,6 +1,7 @@
 import {
 	appendEventLineToContent,
 	buildDefinitionFile,
+	findEventBySourceKey,
 	parseDefinitionFile,
 	removeEventLineFromContent,
 	replaceEventLineInContent,
@@ -127,11 +128,25 @@ export class DataLayer {
 		e.fields = normalizeFields(e.fields, entry.definition.fieldSchema);
 
 		const line = serializeEventLine(e, entry.definition.fieldSchema);
-		const content = await this.vault.read(entry.path);
-		const newContent = appendEventLineToContent(content, line);
-		await this.vault.write(entry.path, newContent);
+		// Capture an existing source-matched event if the dedup check fires,
+		// so we return its real id (and the caller sees the canonical event).
+		let dedupedTo: Event | null = null;
+		await this.vault.process(entry.path, (content) => {
+			if (e.source) {
+				const existing = findEventBySourceKey(
+					content,
+					e.source,
+					entry.definition.fieldSchema,
+				);
+				if (existing) {
+					dedupedTo = existing;
+					return content;
+				}
+			}
+			return appendEventLineToContent(content, line);
+		});
 		await this.invalidate(entry.path);
-		return e;
+		return dedupedTo ?? e;
 	}
 
 	async editEvent(
@@ -157,28 +172,30 @@ export class DataLayer {
 		};
 
 		const newLine = serializeEventLine(merged, entry.definition.fieldSchema);
-		const content = await this.vault.read(entry.path);
-		const result = replaceEventLineInContent(content, eventId, newLine);
-		if (!result.ok) {
-			throw new Error(
-				`event ${eventId} not found in file ${entry.path}`,
-			);
-		}
-		await this.vault.write(entry.path, result.content);
+		await this.vault.process(entry.path, (content) => {
+			const result = replaceEventLineInContent(content, eventId, newLine);
+			if (!result.ok) {
+				throw new Error(
+					`event ${eventId} not found in file ${entry.path}`,
+				);
+			}
+			return result.content;
+		});
 		await this.invalidate(entry.path);
 		return merged;
 	}
 
 	async deleteEvent(definitionId: string, eventId: string): Promise<void> {
 		const entry = await this.requireEntry(definitionId);
-		const content = await this.vault.read(entry.path);
-		const result = removeEventLineFromContent(content, eventId);
-		if (!result.ok) {
-			throw new Error(
-				`event ${eventId} not found in file ${entry.path}`,
-			);
-		}
-		await this.vault.write(entry.path, result.content);
+		await this.vault.process(entry.path, (content) => {
+			const result = removeEventLineFromContent(content, eventId);
+			if (!result.ok) {
+				throw new Error(
+					`event ${eventId} not found in file ${entry.path}`,
+				);
+			}
+			return result.content;
+		});
 		await this.invalidate(entry.path);
 	}
 
@@ -202,9 +219,9 @@ export class DataLayer {
 
 	async updateDefinition(def: Definition): Promise<void> {
 		const entry = await this.requireEntry(def.id);
-		const content = await this.vault.read(entry.path);
-		const newContent = replaceFrontmatter(content, def);
-		await this.vault.write(entry.path, newContent);
+		await this.vault.process(entry.path, (content) =>
+			replaceFrontmatter(content, def),
+		);
 		await this.invalidate(entry.path);
 	}
 

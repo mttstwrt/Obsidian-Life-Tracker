@@ -125,7 +125,7 @@ Rules:
 - **Value**: number (e.g. `32`, `1`, `-0.5`) or empty. Booleans are stored as `1` for true.
 - **Note**: arbitrary text, but **never** contains `|`, `"`, or `\n`.
 - **Field block**: zero or more `key="value"` pairs separated by single spaces. Values are *always* quoted; `"` and newlines inside values are forbidden at write time.
-- **Reserved key `id`**: the ULID-style event id. Always present; do not collide with this key in `fieldSchema`.
+- **Reserved keys `id` and `source`**: `id` is the ULID-style event id (always present); `source` is an optional provenance string (e.g. `source="daily-note"` when the event was logged by ticking a checkbox). Do not collide with either key in `fieldSchema`.
 - **Field ordering** (when writing): `id` first, then keys in `fieldSchema` order, then any unknown keys sorted alphabetically. Parse → re-serialize is byte-equal for well-formed lines.
 
 ### Coercion
@@ -189,6 +189,202 @@ app.vault.on("rename", …);
 ```
 
 To resolve "is this a daily note?", reuse the format from the core Daily Notes plugin's settings — see `src/data/dailyNote.ts:parseDailyNotePath` in this repo for a working parser.
+
+## Consumer read API (reference implementation)
+
+A read-only consumer (analytics dashboard, calendar, an AI wellness coach correlating Life Tracker events with other sources) needs three primitives: **discover paths → enumerate definitions → stream events**. None of them touch the Life Tracker runtime; they read markdown through the vault API. The sketch below is self-contained — drop it into your own plugin and adapt.
+
+### 1. Discover paths
+
+```ts
+import type { App } from "obsidian";
+
+interface LifeTrackerPaths {
+  rootFolder: string;
+  definitionsFolder: string;
+  planHeading: string;
+}
+
+async function discoverPaths(app: App): Promise<LifeTrackerPaths> {
+  const dataPath = ".obsidian/plugins/obsidian-life-tracker/data.json";
+  let data: Record<string, unknown> = {};
+  if (await app.vault.adapter.exists(dataPath)) {
+    try {
+      data = JSON.parse(await app.vault.adapter.read(dataPath));
+    } catch {
+      /* fall through to defaults — never throw on a missing/garbled settings file */
+    }
+  }
+  const rootFolder = (data.rootFolder as string) ?? "LifeTracker";
+  return {
+    rootFolder,
+    definitionsFolder: `${rootFolder}/definitions`,
+    planHeading: (data.planHeading as string) ?? "Timeline",
+  };
+}
+```
+
+Reading `data.json` works even when Life Tracker is disabled — that's the point of the file-as-contract. If the file is absent (plugin never installed), you still get sane defaults.
+
+### 2. Enumerate definitions
+
+Use Obsidian's metadata cache for frontmatter (no YAML dependency, and it's already parsed for you). Read the body once to pull the `## Events` section.
+
+```ts
+import type { TFile } from "obsidian";
+
+interface Definition {
+  id: string;                 // file basename — but trust frontmatter.id when present
+  frontmatter: Record<string, unknown>;
+  fieldSchema: FieldDef[];    // frontmatter.fieldSchema ?? []
+  file: TFile;
+}
+
+async function loadDefinitions(app: App, paths: LifeTrackerPaths): Promise<Definition[]> {
+  const folder = app.vault.getFolderByPath(paths.definitionsFolder);
+  if (!folder) return [];
+  const defs: Definition[] = [];
+  for (const child of folder.children) {
+    if (!("extension" in child) || child.extension !== "md") continue;
+    const file = child as TFile;
+    const fm = app.metadataCache.getFileCache(file)?.frontmatter ?? {};
+    defs.push({
+      id: (fm.id as string) ?? file.basename,
+      frontmatter: fm,
+      fieldSchema: (fm.fieldSchema as FieldDef[]) ?? [],
+      file,
+    });
+  }
+  return defs;
+}
+```
+
+Filter on `frontmatter.status` (skip `"archived"`) and `frontmatter.schemaVersion` (warn if `> 1`) at the call site, per the rules in "Stability and versioning".
+
+### 3. Parse event lines
+
+This mirrors `src/data/eventLine.ts:parseEventLine`. Two rules carry over and matter: **the body is always four ` | `-delimited segments** (an empty field block shows up as a trailing ` |`), and **parsing never throws** — a structurally broken line is skipped, never fatal. The reserved keys are `id` (ULID-style event id) and `source` (provenance string; e.g. `daily-note` when the event came from a ticked checkbox). Everything else is a custom field.
+
+```ts
+interface ParsedEvent {
+  id: string;
+  timestamp: string;          // ISO-8601 local, e.g. "2026-04-28T07:14" (no zone)
+  value?: number;
+  note?: string;
+  source?: string;
+  fields: Record<string, string>;  // raw values; coerce per fieldSchema if you need typed
+}
+
+// Split the line body into exactly 4 segments on " | ", tolerating an empty
+// trailing field block ("… | note |"). Returns null for malformed lines.
+function splitFour(body: string): [string, string, string, string] | null {
+  const parts: string[] = [];
+  let rest = body;
+  for (let i = 0; i < 3; i++) {
+    const idx = rest.indexOf(" | ");
+    if (idx < 0) {
+      if (i === 2 && rest.endsWith(" |")) return [...parts, rest.slice(0, -2), ""] as [string, string, string, string];
+      return null;
+    }
+    parts.push(rest.slice(0, idx));
+    rest = rest.slice(idx + 3);
+  }
+  return [...parts, rest] as [string, string, string, string];
+}
+
+const FIELD_PAIR_RE = /^([a-zA-Z_][a-zA-Z0-9_]*)="([^"\n]*)"\s*/;
+
+function parseEventLine(line: string): ParsedEvent | null {
+  const m = line.match(/^-\s+(.*)$/);
+  if (!m) return null;
+  const split = splitFour(m[1]);
+  if (!split) return null;
+  const [tsRaw, valueRaw, noteRaw, block] = split;
+
+  const fields: Record<string, string> = {};
+  let id = "";
+  let source: string | undefined;
+  let rest = block.trim();
+  while (rest.length > 0) {
+    const pair = rest.match(FIELD_PAIR_RE);
+    if (!pair) break;            // tolerate garbage tail rather than throwing
+    const [, key, val] = pair;
+    if (key === "id") id = val;
+    else if (key === "source") source = val;
+    else fields[key] = val;
+    rest = rest.slice(pair[0].length);
+  }
+
+  const value = /^-?\d+(\.\d+)?$/.test(valueRaw) ? Number(valueRaw) : undefined;
+  return {
+    id,
+    timestamp: tsRaw,
+    value,
+    note: noteRaw === "" ? undefined : noteRaw,
+    source,
+    fields,
+  };
+}
+```
+
+### 4. Stream events (optionally by date range)
+
+Timestamps are ISO-8601 **local time with no zone**, so for same-shaped strings a lexicographic compare is a valid chronological compare — you can range-filter without constructing `Date` objects. Yield lazily so a coach scanning months of history across many definitions doesn't materialize everything at once.
+
+```ts
+interface EventRow extends ParsedEvent {
+  definitionId: string;
+}
+
+async function* streamEvents(
+  app: App,
+  defs: Definition[],
+  range?: { from?: string; to?: string },  // inclusive ISO-local bounds
+): AsyncGenerator<EventRow> {
+  for (const def of defs) {
+    const text = await app.vault.cachedRead(def.file);
+    const lines = text.split("\n");
+    let inEvents = false;
+    for (const raw of lines) {
+      if (raw.startsWith("## ")) { inEvents = raw.trim() === "## Events"; continue; }
+      if (!inEvents) continue;
+      const ev = parseEventLine(raw);
+      if (!ev) continue;
+      if (range?.from && ev.timestamp < range.from) continue;
+      if (range?.to && ev.timestamp > range.to) continue;
+      yield { ...ev, definitionId: def.id };
+    }
+  }
+}
+```
+
+Usage:
+
+```ts
+const paths = await discoverPaths(app);
+const defs = (await loadDefinitions(app, paths))
+  .filter((d) => d.frontmatter.status !== "archived");
+
+for await (const ev of streamEvents(app, defs, { from: "2026-05-01", to: "2026-05-31" })) {
+  // feed ev into your correlation / summarization layer
+}
+```
+
+### 5. Cache and invalidate
+
+Re-reading every definition on every query is fine for a one-shot summary but wasteful for an interactive view. Cache parsed events in memory keyed by file path and invalidate on vault events scoped to the definitions folder:
+
+```ts
+const refresh = (file: TFile) => {
+  if (file.path.startsWith(paths.definitionsFolder)) invalidate(file.path);
+};
+app.vault.on("modify", refresh);
+app.vault.on("create", refresh);
+app.vault.on("delete", refresh);
+app.vault.on("rename", (file, oldPath) => { invalidate(oldPath); refresh(file); });
+```
+
+Only add a daily-note watcher if you also surface **planned-but-not-logged** items (the `- [ ]` checkboxes under `planHeading`); logged events all live in the definition files.
 
 ## Writing data from another plugin
 

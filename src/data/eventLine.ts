@@ -5,6 +5,7 @@ import {
 	type FieldValue,
 	FIELD_KEY_RE,
 	RESERVED_FIELD_KEY_ID,
+	RESERVED_FIELD_KEY_SOURCE,
 } from "./types";
 
 const PERMISSIVE_KEY_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
@@ -43,6 +44,7 @@ export function parseEventLine(
 	const fields: Record<string, FieldValue> = {};
 	const seenKeys = new Set<string>();
 	let id = "";
+	let source: string | undefined;
 
 	const blockResult = parseFieldBlock(fieldBlock);
 	if (!blockResult.ok) {
@@ -67,6 +69,10 @@ export function parseEventLine(
 			id = rawValue;
 			continue;
 		}
+		if (key === RESERVED_FIELD_KEY_SOURCE) {
+			source = rawValue;
+			continue;
+		}
 
 		const def = fieldSchema?.find((f) => f.key === key);
 		fields[key] = coerceField(rawValue, def);
@@ -86,6 +92,7 @@ export function parseEventLine(
 		timestamp: tsRaw,
 		value,
 		note: noteRaw === "" ? undefined : noteRaw,
+		source,
 		fields,
 	};
 
@@ -167,15 +174,21 @@ export function serializeEventLine(
 
 	const entries: Array<[string, string]> = [];
 	if (event.id) entries.push([RESERVED_FIELD_KEY_ID, event.id]);
+	if (event.source) entries.push([RESERVED_FIELD_KEY_SOURCE, event.source]);
 
 	const schemaKeys = (fieldSchema ?? []).map((f) => f.key);
 	for (const key of schemaKeys) {
 		if (key === RESERVED_FIELD_KEY_ID) continue;
+		if (key === RESERVED_FIELD_KEY_SOURCE) continue;
 		if (Object.prototype.hasOwnProperty.call(event.fields, key)) {
 			entries.push([key, event.fields[key].raw]);
 		}
 	}
-	const knownSet = new Set([RESERVED_FIELD_KEY_ID, ...schemaKeys]);
+	const knownSet = new Set([
+		RESERVED_FIELD_KEY_ID,
+		RESERVED_FIELD_KEY_SOURCE,
+		...schemaKeys,
+	]);
 	const extraKeys = Object.keys(event.fields)
 		.filter((k) => !knownSet.has(k))
 		.sort();

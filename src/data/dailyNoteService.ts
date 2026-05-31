@@ -66,9 +66,9 @@ export async function addPlanLineToDailyNote(
 	);
 
 	if (await opts.vault.exists(path)) {
-		const content = await opts.vault.read(path);
-		const updated = insertUnderHeading(content, opts.heading, opts.line);
-		await opts.vault.write(path, updated);
+		await opts.vault.process(path, (content) =>
+			insertUnderHeading(content, opts.heading, opts.line),
+		);
 	} else {
 		const slashIdx = path.lastIndexOf("/");
 		if (slashIdx > 0) {
@@ -157,18 +157,20 @@ export async function markPlanLineForEvent(
 	);
 	if (!(await opts.vault.exists(path))) return null;
 
-	const content = await opts.vault.read(path);
-	const result = markPlanLineCheckedForLabel(
-		content,
-		opts.heading,
-		opts.label,
-		opts.time,
-	);
-	if (!result.matched || result.updated === content) return null;
-
-	opts.beforeWrite?.({ path, matched: result.matched });
-	await opts.vault.write(path, result.updated);
-	return { path, matched: result.matched };
+	let matched: MarkPlanLineMatch | null = null;
+	await opts.vault.process(path, (content) => {
+		const result = markPlanLineCheckedForLabel(
+			content,
+			opts.heading,
+			opts.label,
+			opts.time,
+		);
+		if (!result.matched || result.updated === content) return content;
+		matched = result.matched;
+		opts.beforeWrite?.({ path, matched: result.matched });
+		return result.updated;
+	});
+	return matched ? { path, matched } : null;
 }
 
 export interface RemoveAppendedPlanLineOpts {
@@ -190,18 +192,20 @@ export async function removeAppendedPlanLine(
 	opts: RemoveAppendedPlanLineOpts,
 ): Promise<{ path: string; matched: MarkPlanLineMatch } | null> {
 	if (!(await opts.vault.exists(opts.path))) return null;
-	const content = await opts.vault.read(opts.path);
-	const result = removeCheckedPlanLineForLabel(
-		content,
-		opts.heading,
-		opts.label,
-		opts.time,
-	);
-	if (!result.matched || result.updated === content) return null;
-
-	opts.beforeWrite?.({ path: opts.path, matched: result.matched });
-	await opts.vault.write(opts.path, result.updated);
-	return { path: opts.path, matched: result.matched };
+	let matched: MarkPlanLineMatch | null = null;
+	await opts.vault.process(opts.path, (content) => {
+		const result = removeCheckedPlanLineForLabel(
+			content,
+			opts.heading,
+			opts.label,
+			opts.time,
+		);
+		if (!result.matched || result.updated === content) return content;
+		matched = result.matched;
+		opts.beforeWrite?.({ path: opts.path, matched: result.matched });
+		return result.updated;
+	});
+	return matched ? { path: opts.path, matched } : null;
 }
 
 export interface UnmarkPlanLineForEventOpts {
@@ -224,18 +228,20 @@ export async function unmarkPlanLineForEvent(
 	opts: UnmarkPlanLineForEventOpts,
 ): Promise<{ path: string; matched: MarkPlanLineMatch } | null> {
 	if (!(await opts.vault.exists(opts.path))) return null;
-	const content = await opts.vault.read(opts.path);
-	const result = unmarkPlanLineCheckedForLabel(
-		content,
-		opts.heading,
-		opts.label,
-		opts.time,
-	);
-	if (!result.matched || result.updated === content) return null;
-
-	opts.beforeWrite?.({ path: opts.path, matched: result.matched });
-	await opts.vault.write(opts.path, result.updated);
-	return { path: opts.path, matched: result.matched };
+	let matched: MarkPlanLineMatch | null = null;
+	await opts.vault.process(opts.path, (content) => {
+		const result = unmarkPlanLineCheckedForLabel(
+			content,
+			opts.heading,
+			opts.label,
+			opts.time,
+		);
+		if (!result.matched || result.updated === content) return content;
+		matched = result.matched;
+		opts.beforeWrite?.({ path: opts.path, matched: result.matched });
+		return result.updated;
+	});
+	return matched ? { path: opts.path, matched } : null;
 }
 
 /**

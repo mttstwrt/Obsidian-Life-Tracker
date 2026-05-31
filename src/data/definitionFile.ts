@@ -9,6 +9,34 @@ import {
 	type FieldDef,
 } from "./types";
 
+/**
+ * Scan the `## Events` section for the first event line whose `source` field
+ * equals `sourceKey`. Returns the parsed event, or null if none. Used by
+ * `appendEvent` inside an atomic `vault.process` callback to deduplicate
+ * auto-logged events when the cross-device race fires twice for the same
+ * checkbox.
+ */
+export function findEventBySourceKey(
+	content: string,
+	sourceKey: string,
+	fieldSchema?: FieldDef[],
+): Event | null {
+	const eventsIdx = content.search(EVENTS_HEADING_RE);
+	if (eventsIdx < 0) return null;
+	const tail = content.slice(eventsIdx);
+	const marker = `source="${sourceKey}"`;
+	for (const rawLine of tail.split("\n")) {
+		const line = rawLine.replace(/\r$/, "");
+		if (!line.startsWith("- ")) continue;
+		if (!line.includes(marker)) continue;
+		const result = parseEventLine(line, fieldSchema);
+		if (result.ok && result.event.source === sourceKey) {
+			return result.event;
+		}
+	}
+	return null;
+}
+
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 const EVENTS_HEADING_RE = /^##\s+Events\s*$/m;
 const VALID_KINDS = new Set<DefinitionKind>([

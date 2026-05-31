@@ -172,6 +172,75 @@ describe("DataLayer", () => {
 		expect(events[0].fields.quality.coerced).toBe(3);
 	});
 
+	test("appendEvent dedups by source key", async () => {
+		await layer.createDefinition(RUN_DEF);
+		const first = await layer.appendEvent("running", {
+			id: "",
+			timestamp: "2026-04-28T07:00:00.000Z",
+			value: 30,
+			source: "daily:2026-04-28T07:00",
+			fields: {},
+		});
+		const second = await layer.appendEvent("running", {
+			id: "",
+			timestamp: "2026-04-28T07:00:00.000Z",
+			value: 30,
+			source: "daily:2026-04-28T07:00",
+			fields: {},
+		});
+
+		// Second call must return the first event's id (canonical), not mint a new one.
+		expect(second.id).toBe(first.id);
+		const events = await layer.loadEvents("running");
+		expect(events.length).toBe(1);
+		expect(events[0].source).toBe("daily:2026-04-28T07:00");
+	});
+
+	test("appendEvent without source does not dedup", async () => {
+		await layer.createDefinition(RUN_DEF);
+		await layer.appendEvent("running", {
+			id: "",
+			timestamp: "2026-04-28T07:00:00.000Z",
+			value: 30,
+			fields: {},
+		});
+		await layer.appendEvent("running", {
+			id: "",
+			timestamp: "2026-04-28T07:00:00.000Z",
+			value: 30,
+			fields: {},
+		});
+		const events = await layer.loadEvents("running");
+		expect(events.length).toBe(2);
+	});
+
+	test("appendEvent dedup sees source already in file (cross-device sync race)", async () => {
+		await layer.createDefinition(RUN_DEF);
+		// Simulate the other device's event arriving via sync directly into the
+		// definition file, without going through this DataLayer instance — i.e.
+		// the in-memory cache is stale.
+		const path = "LifeTracker/definitions/running.md";
+		const stale = await vault.read(path);
+		const synced = `${stale.trimEnd()}\n- 2026-04-28T07:00:00.000Z | 30 |  | id="01OTHER" source="daily:2026-04-28T07:00"\n`;
+		await vault.write(path, synced);
+
+		// Now this device tries to auto-log the same checkbox. The cache still
+		// reflects an empty event list, but the atomic process() read inside
+		// appendEvent must see the synced-in event and dedup.
+		const result = await layer.appendEvent("running", {
+			id: "",
+			timestamp: "2026-04-28T07:00:00.000Z",
+			value: 30,
+			source: "daily:2026-04-28T07:00",
+			fields: {},
+		});
+		expect(result.id).toBe("01OTHER");
+
+		const fresh = new DataLayer(vault, "LifeTracker");
+		const events = await fresh.loadEvents("running");
+		expect(events.length).toBe(1);
+	});
+
 	test("loadAllEvents merges across definitions, sorted by timestamp", async () => {
 		await layer.createDefinition(RUN_DEF);
 		await layer.createDefinition({

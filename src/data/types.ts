@@ -31,6 +31,14 @@ export interface Event {
 	timestamp: string;
 	value?: number;
 	note?: string;
+	/**
+	 * Provenance / dedup key. Set by writers that can fire repeatedly for the
+	 * same logical event — currently the daily-note auto-log path, which sets
+	 * `daily:{YYYY-MM-DD}T{HH:MM}` so two devices checking the same plan line
+	 * produce the same source value. `appendEvent` refuses to write a second
+	 * event with a source already present in the file.
+	 */
+	source?: string;
 	fields: Record<string, FieldValue>;
 }
 
@@ -99,3 +107,4 @@ export const CURRENT_SCHEMA_VERSION = 1;
 export const FIELD_KEY_RE = /^[a-z_][a-z0-9_]*$/;
 
 export const RESERVED_FIELD_KEY_ID = "id";
+export const RESERVED_FIELD_KEY_SOURCE = "source";

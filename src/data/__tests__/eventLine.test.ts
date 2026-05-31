@@ -33,6 +33,16 @@ describe("parseEventLine", () => {
 		expect(r.event.fields.hr_avg.coerced).toBe(148);
 	});
 
+	test("extracts source as a top-level field, not a generic field", () => {
+		const r = parseEventLine(
+			'- 2026-04-28T07:00:00.000Z |  |  | id="x" source="daily:2026-04-28T07:00"',
+			SCHEMA,
+		);
+		if (!r.ok) throw new Error(r.error);
+		expect(r.event.source).toBe("daily:2026-04-28T07:00");
+		expect(r.event.fields.source).toBeUndefined();
+	});
+
 	test("preserves unknown keys verbatim as strings", () => {
 		const r = parseEventLine(
 			'- 2026-04-28T07:14 |  |  | id="x" weather="rainy"',
@@ -125,6 +135,21 @@ describe("serializeEventLine", () => {
 		);
 	});
 
+	test("emits source after id, before schema fields", () => {
+		const event: Event = {
+			id: "01HW",
+			timestamp: "2026-04-28T07:14",
+			source: "daily:2026-04-28T07:14",
+			fields: {
+				quality: { raw: "4", coerced: 4 },
+			},
+		};
+		const line = serializeEventLine(event, SCHEMA);
+		expect(line).toBe(
+			'- 2026-04-28T07:14 |  |  | id="01HW" source="daily:2026-04-28T07:14" quality="4"',
+		);
+	});
+
 	test("empty field block leaves no trailing space", () => {
 		const event: Event = {
 			id: "",
@@ -174,6 +199,10 @@ describe("round-trip determinism", () => {
 		},
 		{
 			line: "- 2026-04-24T07:30 | 28 | short |",
+		},
+		{
+			line:
+				'- 2026-04-28T07:00:00.000Z | 1 |  | id="01HW003" source="daily:2026-04-28T07:00"',
 		},
 	];
 

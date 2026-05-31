@@ -10,6 +10,14 @@ export interface VaultAdapter {
 	exists(path: string): Promise<boolean>;
 	read(path: string): Promise<string>;
 	write(path: string, content: string): Promise<void>;
+	/**
+	 * Atomically read-modify-write a file under the vault's file lock. `fn`
+	 * receives the freshest on-disk content and must return the new content
+	 * synchronously. Use this instead of read+write whenever the new content
+	 * depends on the current content — otherwise a concurrent write (another
+	 * device, a sync, or another in-flight code path) can be silently clobbered.
+	 */
+	process(path: string, fn: (content: string) => string): Promise<string>;
 	create(path: string, content: string): Promise<void>;
 	ensureFolder(path: string): Promise<void>;
 	rename(oldPath: string, newPath: string): Promise<void>;
@@ -43,6 +51,14 @@ export class ObsidianVaultAdapter implements VaultAdapter {
 	async write(path: string, content: string): Promise<void> {
 		const file = this.requireFile(path);
 		await this.vault.modify(file, content);
+	}
+
+	async process(
+		path: string,
+		fn: (content: string) => string,
+	): Promise<string> {
+		const file = this.requireFile(path);
+		return this.vault.process(file, fn);
 	}
 
 	async create(path: string, content: string): Promise<void> {
@@ -128,6 +144,17 @@ export class InMemoryVaultAdapter implements VaultAdapter {
 			throw new Error(`file not found: ${path}`);
 		}
 		this.files.set(path, { content, mtime: this.clock() });
+	}
+
+	async process(
+		path: string,
+		fn: (content: string) => string,
+	): Promise<string> {
+		const info = this.files.get(path);
+		if (!info) throw new Error(`file not found: ${path}`);
+		const next = fn(info.content);
+		this.files.set(path, { content: next, mtime: this.clock() });
+		return next;
 	}
 
 	async create(path: string, content: string): Promise<void> {

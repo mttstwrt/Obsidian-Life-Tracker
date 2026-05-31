@@ -75,6 +75,20 @@ export function computeAutoValue(
 export interface AutoEvent {
 	timestamp: string;
 	value?: number;
+	/** Deterministic dedup key — see `Event.source`. */
+	source: string;
+}
+
+/**
+ * Build the dedup key for an auto-logged checkbox event. The format is keyed
+ * on (date, startTime) — independent of device, daily-note path, and label —
+ * so two devices auto-logging the same plan line produce the same value.
+ */
+export function buildAutoEventSource(
+	date: string,
+	startTime: string,
+): string {
+	return `daily:${date}T${startTime}`;
 }
 
 /**
@@ -92,7 +106,11 @@ export function buildAutoEvent(
 		(f) => f.required && !f.retired,
 	);
 	if (required.length > 0) return null;
-	return { timestamp, value: computeAutoValue(def, line) };
+	return {
+		timestamp,
+		value: computeAutoValue(def, line),
+		source: buildAutoEventSource(date, line.startTime),
+	};
 }
 
 export function autoEventToEventInput(auto: AutoEvent): Event {
@@ -100,6 +118,7 @@ export function autoEventToEventInput(auto: AutoEvent): Event {
 		id: "",
 		timestamp: auto.timestamp,
 		value: auto.value,
+		source: auto.source,
 		fields: {},
 	};
 }
