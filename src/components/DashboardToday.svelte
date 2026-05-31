@@ -1,22 +1,70 @@
 <script lang="ts">
 	import type LifeTrackerPlugin from "../main";
-	import type {
-		DashboardSummaries,
-		HabitSummary,
-		MaintenanceSummary,
-		ProjectSummary,
-		ReverseHabitSummary,
+	import {
+		type DashboardSummaries,
+		type HabitSummary,
+		type MaintenanceSummary,
+		type ProjectSummary,
+		type ReverseHabitSummary,
+		startOfDay,
 	} from "../data/dashboard";
+	import type { Definition, Event as TrackerEvent } from "../data/types";
 
 	let {
 		summaries,
 		plugin,
-		now: _now,
+		definitions,
+		eventsByDefinition,
+		now,
 	}: {
 		summaries: DashboardSummaries;
 		plugin: LifeTrackerPlugin;
+		definitions: Definition[];
+		eventsByDefinition: Map<string, TrackerEvent[]>;
 		now: Date;
 	} = $props();
+
+	const definitionById = $derived(
+		new Map(definitions.map((d) => [d.id, d])),
+	);
+
+	type LoggedToday = {
+		event: TrackerEvent;
+		definition: Definition;
+		time: string;
+	};
+
+	const loggedToday: LoggedToday[] = $derived.by(() => {
+		const dayStart = startOfDay(now).getTime();
+		const dayEnd = dayStart + 86_400_000;
+		const out: LoggedToday[] = [];
+		for (const [defId, events] of eventsByDefinition) {
+			const definition = definitionById.get(defId);
+			if (!definition) continue;
+			for (const event of events) {
+				const t = new Date(event.timestamp).getTime();
+				if (Number.isNaN(t) || t < dayStart || t >= dayEnd) continue;
+				out.push({
+					event,
+					definition,
+					time: new Date(event.timestamp).toLocaleTimeString(undefined, {
+						hour: "2-digit",
+						minute: "2-digit",
+						hour12: false,
+					}),
+				});
+			}
+		}
+		out.sort((a, b) => b.event.timestamp.localeCompare(a.event.timestamp));
+		return out;
+	});
+
+	function eventSummary(event: TrackerEvent): string {
+		const parts: string[] = [];
+		if (event.value !== undefined) parts.push(String(event.value));
+		if (event.note) parts.push(event.note);
+		return parts.join(" · ");
+	}
 
 	type Row =
 		| {
@@ -302,6 +350,47 @@
 			</div>
 		</button>
 	{/each}
+
+	<section class="lt-today__logged">
+		<h3 class="lt-today__logged-title">
+			Recorded today
+			{#if loggedToday.length > 0}
+				<span class="lt-today__logged-count">{loggedToday.length}</span>
+			{/if}
+		</h3>
+		{#if loggedToday.length === 0}
+			<p class="lt-today__empty lt-today__empty--soft">
+				Nothing recorded yet today.
+			</p>
+		{:else}
+			<ul class="lt-logged">
+				{#each loggedToday as l (l.event.id)}
+					{@const summary = eventSummary(l.event)}
+					<li>
+						<button
+							type="button"
+							class="lt-logged__row"
+							onclick={() =>
+								plugin.openEventDetail(l.definition, l.event)}
+						>
+							<span class="lt-logged__time">{l.time}</span>
+							{#if l.definition.emoji}
+								<span class="lt-logged__emoji" aria-hidden="true">
+									{l.definition.emoji}
+								</span>
+							{/if}
+							<span class="lt-logged__name">
+								{l.definition.displayName}
+							</span>
+							{#if summary}
+								<span class="lt-logged__summary">{summary}</span>
+							{/if}
+						</button>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</section>
 </div>
 
 <style>
@@ -475,5 +564,82 @@
 		margin-left: -0.3rem;
 		border-radius: 50%;
 		background: var(--interactive-accent);
+	}
+
+	.lt-today__logged {
+		margin-top: 0.5rem;
+		border-top: 1px solid var(--background-modifier-border);
+		padding-top: 0.75rem;
+	}
+	.lt-today__logged-title {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin: 0 0 0.5rem;
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+	.lt-today__logged-count {
+		font-size: 0.7rem;
+		font-weight: 600;
+		color: var(--text-muted);
+		background: var(--background-modifier-border);
+		border-radius: 0.6rem;
+		padding: 0.05rem 0.4rem;
+	}
+
+	.lt-logged {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+	}
+	.lt-logged__row {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
+		width: 100%;
+		padding: 0.4rem 0.5rem;
+		border: none;
+		border-radius: 0.3rem;
+		background: transparent;
+		text-align: left;
+		font: inherit;
+		color: inherit;
+		cursor: pointer;
+	}
+	.lt-logged__row:hover {
+		background: var(--background-modifier-hover);
+	}
+	.lt-logged__row:focus-visible {
+		outline: 2px solid var(--interactive-accent);
+		outline-offset: 1px;
+	}
+	.lt-logged__time {
+		flex-shrink: 0;
+		font-variant-numeric: tabular-nums;
+		font-size: 0.78rem;
+		color: var(--text-muted);
+	}
+	.lt-logged__emoji {
+		flex-shrink: 0;
+	}
+	.lt-logged__name {
+		flex-shrink: 0;
+		font-weight: 500;
+	}
+	.lt-logged__summary {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-size: 0.8rem;
+		color: var(--text-muted);
 	}
 </style>

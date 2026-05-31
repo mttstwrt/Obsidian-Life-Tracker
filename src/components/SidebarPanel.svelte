@@ -72,7 +72,13 @@
 	{:else if loadError}
 		<div class="lt-sidebar__error">Failed to load: {loadError}</div>
 	{:else}
-		<DashboardToday {summaries} {plugin} {now} />
+		<DashboardToday
+			{summaries}
+			{plugin}
+			{definitions}
+			{eventsByDefinition}
+			{now}
+		/>
 	{/if}
 </div>
 

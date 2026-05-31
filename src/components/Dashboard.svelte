@@ -147,7 +147,13 @@
 
 		<div class="lt-dash__panel">
 			{#if activeTab === "today"}
-				<DashboardToday {summaries} {plugin} {now} />
+				<DashboardToday
+					{summaries}
+					{plugin}
+					{definitions}
+					{eventsByDefinition}
+					{now}
+				/>
 			{:else if activeTab === "habits"}
 				<DashboardHabits {summaries} {plugin} {now} />
 			{:else if activeTab === "maintenance"}
