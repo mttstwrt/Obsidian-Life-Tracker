@@ -73,7 +73,7 @@ export interface ReverseHabitSummary {
 
 const MS_PER_DAY = 86_400_000;
 const PROJECT_DEFAULT_DORMANT_DAYS = 14;
-const HABITS_GRID_DAYS = 14;
+const HABITS_GRID_DAYS = 28;
 const MILESTONE_PROXIMITY_DAYS = 3;
 
 export function dateString(d: Date): string {

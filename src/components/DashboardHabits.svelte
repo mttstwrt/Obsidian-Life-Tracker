@@ -4,6 +4,7 @@
 		type DashboardSummaries,
 		type HabitSummary,
 		type ReverseHabitSummary,
+		HABITS_GRID_LENGTH,
 		applyOrder,
 		gridDates,
 	} from "../data/dashboard";
@@ -30,7 +31,43 @@
 		return [...tags].sort();
 	});
 
-	const dates = $derived(gridDates(now, 14));
+	// The day grid is sized to fit the available width with no horizontal
+	// scrollbar. Rather than estimating column widths (which breaks for long
+	// habit names or different fonts), we measure the actual rendered columns:
+	// the name + period header cells are the fixed overhead, and one day header
+	// cell gives the per-day width. The table sizes to content (not 100%), so
+	// these measurements are stable regardless of how many days we show.
+	let gridWidth: number = $state(0); // scroll container inner width
+	let nameTh: HTMLTableCellElement | undefined = $state();
+	let periodTh: HTMLTableCellElement | undefined = $state();
+	let dayThs: HTMLTableCellElement[] = $state([]);
+
+	let fixedColsWidth = $state(0); // name + period, measured (px)
+	let dayColWidth = $state(0); // a single day column, measured (px)
+
+	$effect(() => {
+		void gridWidth; // re-measure on container resize
+		const dayTh = dayThs[0];
+		if (nameTh && periodTh && dayTh) {
+			fixedColsWidth = nameTh.offsetWidth + periodTh.offsetWidth;
+			dayColWidth = dayTh.offsetWidth;
+		}
+	});
+
+	const dayCount = $derived.by(() => {
+		if (gridWidth <= 0 || dayColWidth <= 0) {
+			return Math.min(14, HABITS_GRID_LENGTH);
+		}
+		// Leave half a day-column of breathing room so sub-pixel rounding can
+		// never tip the grid into a scrollbar.
+		const buffer = dayColWidth * 0.5;
+		const fit = Math.floor(
+			(gridWidth - fixedColsWidth - buffer) / dayColWidth,
+		);
+		return Math.max(7, Math.min(HABITS_GRID_LENGTH, fit));
+	});
+
+	const dates = $derived(gridDates(now, dayCount));
 
 	const order = $derived(plugin.settings.definitionOrder.habits ?? []);
 
@@ -107,11 +144,11 @@
 			No habits yet. Use “New definition” to create one.
 		</p>
 	{:else}
-		<div class="lt-habits__scroll">
+		<div class="lt-habits__scroll" bind:clientWidth={gridWidth}>
 			<table class="lt-habits__grid">
 				<thead>
 					<tr>
-						<th class="lt-habits__name-col">
+						<th class="lt-habits__name-col" bind:this={nameTh}>
 							<button
 								type="button"
 								class="lt-habits__header-button"
@@ -121,13 +158,14 @@
 								Habit
 							</button>
 						</th>
-						<th class="lt-habits__period-col">Period</th>
+						<th class="lt-habits__period-col" bind:this={periodTh}>Period</th>
 						{#each dates as d, i (d)}
 							<th
 								class="lt-habits__day-col"
 								class:lt-habits__day-col--old={i < dates.length - 7}
 								class:today={isToday(d)}
 								title={d}
+								bind:this={dayThs[i]}
 							>
 								<div class="lt-habits__dow">{dayOfWeek(d)}</div>
 								<div class="lt-habits__date">{shortDate(d)}</div>
@@ -399,13 +437,14 @@
 	.lt-habits__cell-button {
 		width: 1.7rem;
 		height: 1.7rem;
+		margin: 0 auto;
 		border-radius: 0.25rem;
 		background: var(--background-modifier-hover);
 		border: 1px solid transparent;
 		cursor: pointer;
 		font-size: 0.7rem;
 		padding: 0;
-		display: inline-flex;
+		display: flex;
 		align-items: center;
 		justify-content: center;
 	}
