@@ -241,6 +241,45 @@ describe("DataLayer", () => {
 		expect(events.length).toBe(1);
 	});
 
+	test("read-time dedup collapses sync-merged same-source lines", async () => {
+		await layer.createDefinition(RUN_DEF);
+		// Simulate remotely-save merging two devices' copies: both auto-logged the
+		// same checkbox concurrently, so two lines with the same source but
+		// different ULIDs ended up in the file. Neither write saw the other, so
+		// append-time dedup never fired.
+		const path = "LifeTracker/definitions/running.md";
+		const base = await vault.read(path);
+		const merged =
+			`${base.trimEnd()}\n` +
+			`- 2026-04-28T07:00:00.000Z | 30 |  | id="01BBBB" source="daily:2026-04-28T07:00"\n` +
+			`- 2026-04-28T07:00:00.000Z | 30 |  | id="01AAAA" source="daily:2026-04-28T07:00"\n`;
+		await vault.write(path, merged);
+
+		const fresh = new DataLayer(vault, "LifeTracker");
+		const events = await fresh.loadEvents("running");
+		expect(events.length).toBe(1);
+		// Canonical = smallest id (earliest ULID), device-independently.
+		expect(events[0].id).toBe("01AAAA");
+	});
+
+	test("deleting a deduped event removes all same-source lines (no resurface)", async () => {
+		await layer.createDefinition(RUN_DEF);
+		const path = "LifeTracker/definitions/running.md";
+		const base = await vault.read(path);
+		const merged =
+			`${base.trimEnd()}\n` +
+			`- 2026-04-28T07:00:00.000Z | 30 |  | id="01BBBB" source="daily:2026-04-28T07:00"\n` +
+			`- 2026-04-28T07:00:00.000Z | 30 |  | id="01AAAA" source="daily:2026-04-28T07:00"\n`;
+		await vault.write(path, merged);
+
+		const fresh = new DataLayer(vault, "LifeTracker");
+		const events = await fresh.loadEvents("running");
+		await fresh.deleteEvent("running", events[0].id);
+
+		const after = new DataLayer(vault, "LifeTracker");
+		expect((await after.loadEvents("running")).length).toBe(0);
+	});
+
 	test("loadAllEvents merges across definitions, sorted by timestamp", async () => {
 		await layer.createDefinition(RUN_DEF);
 		await layer.createDefinition({

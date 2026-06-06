@@ -4,6 +4,7 @@ import {
 	findEventBySourceKey,
 	parseDefinitionFile,
 	removeEventLineFromContent,
+	removeEventLinesBySource,
 	replaceEventLineInContent,
 	replaceFrontmatter,
 } from "./definitionFile";
@@ -187,7 +188,15 @@ export class DataLayer {
 
 	async deleteEvent(definitionId: string, eventId: string): Promise<void> {
 		const entry = await this.requireEntry(definitionId);
+		// entry.events is source-deduped, so this is the canonical event; capture
+		// its source to wipe any sync-merged duplicate lines too, otherwise a
+		// leftover same-source line would resurface as a fresh event on next read.
+		const source = entry.events.find((e) => e.id === eventId)?.source;
 		await this.vault.process(entry.path, (content) => {
+			if (source) {
+				const bySource = removeEventLinesBySource(content, source);
+				if (bySource.ok) return bySource.content;
+			}
 			const result = removeEventLineFromContent(content, eventId);
 			if (!result.ok) {
 				throw new Error(
@@ -312,7 +321,7 @@ export class DataLayer {
 			path,
 			mtime,
 			definition: migrated.definition,
-			events: parsed.events,
+			events: dedupeEventsBySource(parsed.events),
 			body: parsed.body,
 			warnings: parsed.warnings,
 		};
@@ -367,6 +376,32 @@ function normalizeFields(
 		}
 	}
 	return out;
+}
+
+/**
+ * Collapse events that share a non-empty `source` to a single canonical event.
+ * This is the cross-device safety net: remotely-save can merge two definition-file
+ * versions that each auto-logged the same checkbox, leaving two lines with the same
+ * source but different ULIDs. Append-time dedup can't catch that (neither write saw
+ * the other), so every read must reconcile.
+ *
+ * The canonical event is the one with the lexicographically smallest id (i.e. the
+ * earliest ULID). That choice is device-independent, so all devices agree on which
+ * duplicate survives — keeping edit/delete (which target an id) consistent.
+ */
+function dedupeEventsBySource(events: Event[]): Event[] {
+	const canonicalIdBySource = new Map<string, string>();
+	for (const e of events) {
+		if (!e.source) continue;
+		const cur = canonicalIdBySource.get(e.source);
+		if (cur === undefined || e.id < cur) {
+			canonicalIdBySource.set(e.source, e.id);
+		}
+	}
+	if (canonicalIdBySource.size === 0) return events;
+	return events.filter(
+		(e) => !e.source || canonicalIdBySource.get(e.source) === e.id,
+	);
 }
 
 function filterByRange(events: Event[], range?: DateRange): Event[] {

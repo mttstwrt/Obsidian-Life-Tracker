@@ -476,3 +476,28 @@ export function removeEventLineFromContent(
 	}
 	return { ok: removed, content: out.join("\n") };
 }
+
+/**
+ * Remove *every* event line carrying the given `source` key. Unlike
+ * `removeEventLineFromContent` (which targets a single id), this collapses all
+ * sync-merged duplicates of an auto-logged event in one pass — so deleting a
+ * deduped event can't leave a stray same-source line behind that would resurface
+ * as a "new" event on the next read.
+ */
+export function removeEventLinesBySource(
+	content: string,
+	sourceKey: string,
+): { ok: boolean; content: string } {
+	const marker = `source="${sourceKey}"`;
+	const lines = content.split("\n");
+	const out: string[] = [];
+	let removed = false;
+	for (const line of lines) {
+		if (line.startsWith("- ") && line.includes(marker)) {
+			removed = true;
+			continue;
+		}
+		out.push(line);
+	}
+	return { ok: removed, content: out.join("\n") };
+}
