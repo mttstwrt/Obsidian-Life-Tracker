@@ -1,4 +1,12 @@
-import { Notice, Plugin, TFile, type WorkspaceLeaf } from "obsidian";
+import {
+	MarkdownRenderChild,
+	Notice,
+	Plugin,
+	TFile,
+	type WorkspaceLeaf,
+} from "obsidian";
+import { mount, unmount } from "svelte";
+import CodeBlockView from "./components/CodeBlockView.svelte";
 import { DataLayer } from "./data/dataLayer";
 import {
 	formatPlanLine,
@@ -26,6 +34,7 @@ import {
 } from "./data/planSync";
 import { ObsidianVaultAdapter, type VaultAdapter } from "./data/vaultAdapter";
 import type { Definition, Event } from "./data/types";
+import { createApi, type LifeTrackerApi } from "./api";
 import { DashboardView, VIEW_TYPE_DASHBOARD } from "./views/DashboardView";
 import { SidebarView, VIEW_TYPE_SIDEBAR } from "./views/SidebarView";
 import { DefinitionFormModal } from "./views/DefinitionFormModal";
@@ -48,6 +57,7 @@ interface LifeTrackerSettings {
 	habitWindowMode: "calendar" | "rolling";
 	recordUnplannedEvents: boolean;
 	linkActivitiesToDefinitions: boolean;
+	overviewMode: "definitions" | "tags";
 }
 
 const DEFAULT_SETTINGS: LifeTrackerSettings = {
@@ -59,6 +69,7 @@ const DEFAULT_SETTINGS: LifeTrackerSettings = {
 	habitWindowMode: "calendar",
 	recordUnplannedEvents: true,
 	linkActivitiesToDefinitions: false,
+	overviewMode: "definitions",
 };
 
 const RECENT_LIMIT = 20;
@@ -78,6 +89,8 @@ interface MarkedPlanInfo {
 export default class LifeTrackerPlugin extends Plugin {
 	settings!: LifeTrackerSettings;
 	data!: DataLayer;
+	/** In-process integration surface for other plugins. See src/api.ts. */
+	api!: LifeTrackerApi;
 	private vaultAdapter!: VaultAdapter;
 	private processedPlanKeys = new Set<string>();
 
@@ -170,6 +183,7 @@ export default class LifeTrackerPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 		this.rebuildDataLayer();
+		this.api = createApi(this);
 
 		this.registerView(
 			VIEW_TYPE_DASHBOARD,
@@ -213,6 +227,12 @@ export default class LifeTrackerPlugin extends Plugin {
 		});
 
 		await this.registerQuickLogCommands();
+
+		// Embeddable views: a `lifetracker` fenced code block with a small YAML
+		// spec renders one of the dashboard charts inside any note.
+		this.registerMarkdownCodeBlockProcessor("lifetracker", (source, el, ctx) => {
+			ctx.addChild(new LifeTrackerCodeBlock(el, this, source));
+		});
 
 		this.addSettingTab(new LifeTrackerSettingTab(this.app, this));
 
@@ -346,6 +366,40 @@ export default class LifeTrackerPlugin extends Plugin {
 			new Notice(`Failed to plan: ${(err as Error).message ?? String(err)}`);
 			throw err;
 		}
+	}
+
+	/** API-path logging: append + the same after-log flow as the UI, minus the undo notice. */
+	async logEventViaApi(definitionId: string, event: Event): Promise<Event> {
+		const logged = await this.data.appendEvent(definitionId, event);
+		await this.afterEventLogged(definitionId, logged);
+		this.refreshDashboards();
+		return logged;
+	}
+
+	/** API-path planning: write an unchecked plan line into the day's daily note. */
+	async planItemViaApi(
+		definitionId: string,
+		date: string,
+		startTime: string,
+		endTime?: string,
+	): Promise<string> {
+		const def = await this.data.getDefinition(definitionId);
+		if (!def) throw new Error(`definition not found: ${definitionId}`);
+		const line = formatPlanLine({
+			kind: def.kind,
+			displayName: def.displayName,
+			startTime,
+			endTime,
+			tags: def.tags,
+			linkTarget: this.settings.linkActivitiesToDefinitions ? def.id : undefined,
+		});
+		return await addPlanLineToDailyNote({
+			app: this.app,
+			vault: this.vaultAdapter,
+			date,
+			heading: this.settings.planHeading,
+			line,
+		});
 	}
 
 	async quickLog(definitionId: string): Promise<void> {
@@ -560,14 +614,14 @@ export default class LifeTrackerPlugin extends Plugin {
 		if (logged > 0) {
 			new Notice(
 				logged === 1
-					? `Auto-logged 1 event from daily note`
+					? "Auto-logged 1 event from daily note"
 					: `Auto-logged ${logged} events from daily note`,
 			);
 		}
 		if (unlogged > 0) {
 			new Notice(
 				unlogged === 1
-					? `Removed 1 auto-logged event`
+					? "Removed 1 auto-logged event"
 					: `Removed ${unlogged} auto-logged events`,
 			);
 		}
@@ -711,5 +765,32 @@ export default class LifeTrackerPlugin extends Plugin {
 		const list = [id, ...this.settings.recentDefinitionIds.filter((x) => x !== id)];
 		this.settings.recentDefinitionIds = list.slice(0, RECENT_LIMIT);
 		await this.saveSettings();
+	}
+}
+
+/** Hosts a mounted CodeBlockView and unmounts it when the block leaves the DOM. */
+class LifeTrackerCodeBlock extends MarkdownRenderChild {
+	private component: ReturnType<typeof mount> | null = null;
+
+	constructor(
+		el: HTMLElement,
+		private plugin: LifeTrackerPlugin,
+		private source: string,
+	) {
+		super(el);
+	}
+
+	onload(): void {
+		this.component = mount(CodeBlockView, {
+			target: this.containerEl,
+			props: { plugin: this.plugin, source: this.source },
+		});
+	}
+
+	onunload(): void {
+		if (this.component) {
+			unmount(this.component);
+			this.component = null;
+		}
 	}
 }

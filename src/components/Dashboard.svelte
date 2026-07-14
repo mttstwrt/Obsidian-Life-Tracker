@@ -6,7 +6,7 @@
 		type DashboardSummaries,
 		summarizeAll,
 	} from "../data/dashboard";
-	import DashboardToday from "./DashboardToday.svelte";
+	import DashboardOverview from "./DashboardOverview.svelte";
 	import DashboardHabits from "./DashboardHabits.svelte";
 	import DashboardMaintenance from "./DashboardMaintenance.svelte";
 	import DashboardProjects from "./DashboardProjects.svelte";
@@ -24,7 +24,7 @@
 	} = $props();
 
 	type TabKey =
-		| "today"
+		| "overview"
 		| "habits"
 		| "maintenance"
 		| "projects"
@@ -34,7 +34,7 @@
 		| "settings";
 
 	const tabs: { key: TabKey; label: string; emoji: string }[] = [
-		{ key: "today", label: "Today", emoji: "🌅" },
+		{ key: "overview", label: "Overview", emoji: "🌅" },
 		{ key: "habits", label: "Habits", emoji: "🔁" },
 		{ key: "maintenance", label: "Maintenance", emoji: "🛠" },
 		{ key: "projects", label: "Projects", emoji: "📁" },
@@ -44,7 +44,7 @@
 		{ key: "settings", label: "Settings", emoji: "⚙" },
 	];
 
-	let activeTab: TabKey = $state("today");
+	let activeTab: TabKey = $state("overview");
 	let definitions: Definition[] = $state([]);
 	let eventsByDefinition: Map<string, TrackerEvent[]> = $state(new Map());
 	let warnings: string[] = $state([]);
@@ -146,8 +146,8 @@
 		{/if}
 
 		<div class="lt-dash__panel">
-			{#if activeTab === "today"}
-				<DashboardToday
+			{#if activeTab === "overview"}
+				<DashboardOverview
 					{summaries}
 					{plugin}
 					{definitions}

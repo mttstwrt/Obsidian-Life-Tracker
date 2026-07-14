@@ -1,8 +1,11 @@
 # Integrating with Life Tracker
 
-This document describes Life Tracker's on-disk data model so other Obsidian plugins (calendar, dashboard, journal, etc.) can read, render, and write Life Tracker data without depending on the plugin runtime.
+This document describes Life Tracker's two integration surfaces:
 
-The **file format is the integration contract**. There is no JS API; instead, every piece of state lives in plain markdown in the user's vault. That gives integrators three guarantees:
+1. **The on-disk file format** (this section onward) — the contract for *decoupled, read-oriented* consumers. Works even when Life Tracker is disabled or uninstalled.
+2. **The runtime API** (see "Runtime API" at the end) — a versioned in-process surface on the plugin instance, for co-installed plugins that need *safe writes* or computed summaries. Writes should go through it: ULID generation, field coercion, source-dedup, daily-note mirroring, and cache invalidation all live in the runtime and are easy to get wrong from outside.
+
+The **file format is the primary integration contract**. Every piece of state lives in plain markdown in the user's vault. That gives integrators three guarantees:
 
 - **Decoupled lifecycle.** The calendar plugin can read Life Tracker data even when Life Tracker is disabled, uninstalled, or loading later in startup order.
 - **No plugin-to-plugin imports.** No `app.plugins.plugins["obsidian-life-tracker"]` calls, no shared types package.
@@ -403,6 +406,34 @@ For daily-note plan lines, prefer using the same line shapes Life Tracker emits 
 - Frontmatter carries `schemaVersion: 1`. Check it; surface a warning if you see a higher number.
 - The 4-segment event line is the most stable part of the contract. Field ordering and the wikilink format may extend (new optional segments), but the existing segments will not be reordered or removed within `schemaVersion: 1`.
 - Settings keys (`rootFolder`, `planHeading`, `recordUnplannedEvents`, `linkActivitiesToDefinitions`) are stable but may grow. Treat unknown keys as opaque.
+
+## Runtime API
+
+For co-installed plugins (the vault-assistant AI agent is the reference consumer), the plugin instance exposes a small versioned API:
+
+```ts
+const lt = app.plugins.plugins["obsidian-life-tracker"] as
+  | { api?: LifeTrackerApi }
+  | undefined;
+if (!lt?.api) return; // plugin missing or disabled — fall back to the file contract
+if (!lt.api.version.startsWith("1.")) warnIncompatible(lt.api.version);
+
+interface LifeTrackerApi {
+  version: string;                     // semver, currently "1.0.0"
+  toolDescriptors: ToolDescriptor[];   // MCP-shaped: name, description, inputSchema
+  invoke(name: string, args: Record<string, unknown>): Promise<string>;
+}
+```
+
+`invoke` **never throws** and always resolves to a JSON string; failures come back as `{"error": "..."}` — the shape is designed for a language-model consumer, and the descriptors map 1:1 onto MCP/OpenAI tool schemas.
+
+Tools (v1): `list_definitions`, `query_events`, `get_summaries`, `log_event`, `edit_event`, `delete_event`, `plan_item` (writes an unchecked plan line into the daily note), `create_definition`.
+
+Guidance:
+
+- **Reads**: either surface works. `get_summaries` is the reason to prefer the API — streaks, freshness, and period progress are computed, not stored.
+- **Writes**: use the API. `log_event` runs the same path as the UI (dedup, coercion, daily-note mirror); hand-writing event lines risks silent divergence.
+- **Versioning**: check `api.version` major. New tools/fields are minor bumps; breaking changes bump the major.
 
 ## Open questions for the calendar plugin
 

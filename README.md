@@ -18,13 +18,23 @@ Every entry is an *event* — a thing that happened at a moment in time, optiona
 
 ## Features
 
-- **Dashboard view** with tabs for Today, Habits, Maintenance, Projects, Counters, and Analytics. The Today tab surfaces what's due, what's overdue, and what you've already logged.
+- **Dashboard view** with tabs for Overview, Habits, Maintenance, Projects, Counters, and Analytics. The Overview tab is a unified day grid over everything you track — as much history as fits your screen — with a toggle between per-definition rows and tag-aggregated rows; click any cell to log or plan for that date.
 - **Sidebar panel** for at-a-glance status without leaving your current note.
 - **Daily-note sync** — tick a checkbox under your timeline heading and the matching event is logged automatically; un-tick it to remove the event. Compatible with the Tasks plugin's metadata.
 - **Quick-log commands** for any definition, bindable to your own hotkeys.
 - **Custom fields per definition** — number, string, boolean, enum, list. Add or retire fields without migrating old data.
 - **Undo** on every log, with an inline notice.
 - **Charts**: calendar heatmaps, sparklines, streak bars, freshness timelines, milestone timelines, and per-field charts.
+- **Embeddable views** — drop a `lifetracker` fenced code block into any note to render a chart inline:
+
+  ````markdown
+  ```lifetracker
+  view: heatmap        # heatmap | sparkline | streak | events
+  definition: running  # or definitions: [...] / tags: [exercise]
+  days: 90             # optional
+  ```
+  ````
+
 - **Plain-markdown storage** — greppable, sync-friendly, portable. Your data outlives the plugin.
 
 ## Installing
@@ -42,7 +52,7 @@ Once published: open **Settings → Community plugins → Browse**, search for "
 1. **Pick a root folder.** In the plugin's settings tab, set the folder Life Tracker should keep its definitions in (default: `LifeTracker/`). Each thing you track gets its own markdown file there.
 2. **Create your first definition.** Run the command **Life Tracker: New definition**, choose a kind, give it a name and emoji, and (optionally) add custom fields.
 3. **Log an event.** Use **Life Tracker: Log event** to pick a definition and fill in the form, or assign a hotkey to a per-definition quick-log command for one-keystroke logging.
-4. **Open the dashboard** from the activity ribbon icon (or the **Open dashboard** command). The Today tab shows what's due now; the kind-specific tabs show streaks, freshness, effort, and totals.
+4. **Open the dashboard** from the activity ribbon icon (or the **Open dashboard** command). The Overview tab shows everything you track on one day grid; the kind-specific tabs show streaks, freshness, effort, and totals.
 5. **Open the sidebar** from the second ribbon icon for a compact always-on view.
 
 ### Logging from your daily note
