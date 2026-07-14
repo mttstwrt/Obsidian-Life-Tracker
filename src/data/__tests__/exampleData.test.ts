@@ -90,9 +90,9 @@ describe("seeded example data", () => {
 		const aPatternLanguage = parsed.events.find((e) =>
 			e.fields.title?.raw.includes("Pattern Language"),
 		);
-		expect(aPatternLanguage).toBeDefined();
-		expect("rating" in aPatternLanguage!.fields).toBe(true);
-		expect(aPatternLanguage!.fields.rating.raw).toBe("");
+		if (!aPatternLanguage) throw new Error("Pattern Language event not found");
+		expect("rating" in aPatternLanguage.fields).toBe(true);
+		expect(aPatternLanguage.fields.rating.raw).toBe("");
 	});
 
 	test("wash-sheets.md flags detergent='bleach' as not in enum options", () => {

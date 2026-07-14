@@ -130,17 +130,18 @@ export function buildDefinitionFromInput(
 		.map((t) => t.trim())
 		.filter((t) => t.length > 0);
 
-	const editing = opts.existing !== undefined;
-	const id = editing
-		? opts.existing!.id
+	// Local alias so the ternaries below narrow away `undefined` without
+	// non-null assertions (property accesses don't narrow through `editing`).
+	const existing = opts.existing;
+	const editing = existing !== undefined;
+	const id = existing
+		? existing.id
 		: uniqueSlug(slugify(displayName), opts.existingIds);
-	const created = editing
-		? opts.existing!.created
+	const created = existing
+		? existing.created
 		: dateStringFrom((opts.now ?? (() => new Date()))());
-	const schemaVersion = editing
-		? opts.existing!.schemaVersion
-		: CURRENT_SCHEMA_VERSION;
-	const status = editing ? opts.existing!.status : "active";
+	const schemaVersion = existing ? existing.schemaVersion : CURRENT_SCHEMA_VERSION;
+	const status = existing ? existing.status : "active";
 	const emoji = input.emoji?.trim() === "" ? undefined : input.emoji?.trim();
 
 	const defaultDurationRaw = (input.defaultDurationMinutes ?? "").trim();

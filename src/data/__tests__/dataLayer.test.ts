@@ -64,8 +64,8 @@ describe("DataLayer", () => {
 			value: 32,
 			note: "loop",
 			fields: {
-				quality: coerceField("4", RUN_DEF.fieldSchema![0]),
-				route: coerceField("park", RUN_DEF.fieldSchema![1]),
+				quality: coerceField("4", RUN_DEF.fieldSchema?.[0]),
+				route: coerceField("park", RUN_DEF.fieldSchema?.[1]),
 			},
 		};
 		const written = await layer.appendEvent("running", e);
@@ -160,7 +160,7 @@ describe("DataLayer", () => {
 			timestamp: "2026-04-28T07:14",
 			value: 30,
 			fields: {
-				quality: coerceField("3", RUN_DEF.fieldSchema![0]),
+				quality: coerceField("3", RUN_DEF.fieldSchema?.[0]),
 			},
 		});
 		await layer.retireField("running", "quality");
@@ -250,9 +250,7 @@ describe("DataLayer", () => {
 		const path = "LifeTracker/definitions/running.md";
 		const base = await vault.read(path);
 		const merged =
-			`${base.trimEnd()}\n` +
-			`- 2026-04-28T07:00:00.000Z | 30 |  | id="01BBBB" source="daily:2026-04-28T07:00"\n` +
-			`- 2026-04-28T07:00:00.000Z | 30 |  | id="01AAAA" source="daily:2026-04-28T07:00"\n`;
+			`${base.trimEnd()}\n- 2026-04-28T07:00:00.000Z | 30 |  | id="01BBBB" source="daily:2026-04-28T07:00"\n- 2026-04-28T07:00:00.000Z | 30 |  | id="01AAAA" source="daily:2026-04-28T07:00"\n`;
 		await vault.write(path, merged);
 
 		const fresh = new DataLayer(vault, "LifeTracker");
@@ -267,9 +265,7 @@ describe("DataLayer", () => {
 		const path = "LifeTracker/definitions/running.md";
 		const base = await vault.read(path);
 		const merged =
-			`${base.trimEnd()}\n` +
-			`- 2026-04-28T07:00:00.000Z | 30 |  | id="01BBBB" source="daily:2026-04-28T07:00"\n` +
-			`- 2026-04-28T07:00:00.000Z | 30 |  | id="01AAAA" source="daily:2026-04-28T07:00"\n`;
+			`${base.trimEnd()}\n- 2026-04-28T07:00:00.000Z | 30 |  | id="01BBBB" source="daily:2026-04-28T07:00"\n- 2026-04-28T07:00:00.000Z | 30 |  | id="01AAAA" source="daily:2026-04-28T07:00"\n`;
 		await vault.write(path, merged);
 
 		const fresh = new DataLayer(vault, "LifeTracker");
@@ -334,8 +330,8 @@ describe("DataLayer", () => {
 				value: 32,
 				note: "morning loop",
 				fields: {
-					quality: coerceField("4", RUN_DEF.fieldSchema![0]),
-					route: coerceField("park", RUN_DEF.fieldSchema![1]),
+					quality: coerceField("4", RUN_DEF.fieldSchema?.[0]),
+					route: coerceField("park", RUN_DEF.fieldSchema?.[1]),
 				},
 			},
 		];

@@ -148,9 +148,9 @@ describe("computeAutoValue", () => {
 describe("buildAutoEvent", () => {
 	test("returns timestamp + value for a simple habit", () => {
 		const out = buildAutoEvent(habit(), checked("07:00", "07:30"), "2026-05-03");
-		expect(out).not.toBeNull();
-		expect(new Date(out!.timestamp).getHours()).toBe(7);
-		expect(out!.value).toBe(1);
+		if (!out) throw new Error("expected an auto event");
+		expect(new Date(out.timestamp).getHours()).toBe(7);
+		expect(out.value).toBe(1);
 	});
 
 	test("returns null when definition has unfilled required fields", () => {
