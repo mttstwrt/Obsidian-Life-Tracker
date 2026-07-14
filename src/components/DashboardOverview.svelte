@@ -3,11 +3,13 @@
 	import type { Definition, Event as TrackerEvent } from "../data/types";
 	import {
 		type DashboardSummaries,
+		type FreshnessStatus,
 		applyOrder,
 		dateString,
 		gridDates,
+		projectFreshnessStatus,
 	} from "../data/dashboard";
-	import { eventsByDate } from "../data/visualizations";
+	import { eventsByDate, toneColor } from "../data/visualizations";
 	import { TagDayModal, type TagDayEntry } from "../views/TagDayModal";
 
 	let {
@@ -85,6 +87,10 @@
 		status: string;
 		statusTone: StatusTone;
 		statusLabel: string;
+		/** Drives the maintenance-style left-border indicator; omitted for counters. */
+		freshness?: FreshnessStatus;
+		/** Reverse habits use a continuous tone color instead of the 4-state freshness. */
+		freshnessColor?: string;
 	}
 
 	interface OverviewGroup {
@@ -107,6 +113,14 @@
 			statusTone: h.dueToday ? ("warn" as const) : undefined,
 			statusLabel:
 				h.currentStreak > 0 ? `streak ${h.currentStreak}` : h.periodLabel,
+			freshness:
+				h.totalEvents === 0
+					? ("never" as const)
+					: h.periodTarget <= 0
+						? undefined
+						: h.dueToday
+							? ("approaching" as const)
+							: ("ok" as const),
 		}));
 		if (habits.length) out.push({ label: "Habits", rows: habits });
 
@@ -128,6 +142,8 @@
 				r.nextMilestone !== undefined
 					? `next ${r.nextMilestone}d`
 					: `best ${r.personalBestDays}d`,
+			freshness: r.daysSince === null ? ("never" as const) : undefined,
+			freshnessColor: r.daysSince === null ? undefined : toneColor(r.tone),
 		}));
 		if (reverse.length) out.push({ label: "Reverse habits", rows: reverse });
 
@@ -146,6 +162,7 @@
 						? ("warn" as const)
 						: ("ok" as const),
 			statusLabel: `every ${m.definition.intervalDays}d`,
+			freshness: m.status,
 		}));
 		if (maint.length) out.push({ label: "Maintenance", rows: maint });
 
@@ -166,6 +183,7 @@
 							: `${p.daysSince}d ago`,
 			statusTone: p.isDormant ? ("warn" as const) : undefined,
 			statusLabel: `${p.eventsLast30} in 30d`,
+			freshness: projectFreshnessStatus(p),
 		}));
 		if (projects.length) out.push({ label: "Projects", rows: projects });
 
@@ -315,7 +333,17 @@
 							{#each group.rows as row (row.definition.id)}
 								{@const counts = countsByDefinition.get(row.definition.id)}
 								<tr>
-									<th scope="row" class="lt-ov__name-cell">
+									<th
+										scope="row"
+										class="lt-ov__name-cell"
+										class:lt-ov__name-cell--never={row.freshness === "never"}
+										class:lt-ov__name-cell--approaching={row.freshness ===
+											"approaching"}
+										class:lt-ov__name-cell--overdue={row.freshness ===
+											"overdue"}
+										class:lt-ov__name-cell--ok={row.freshness === "ok"}
+										style:border-left-color={row.freshnessColor}
+									>
 										<button
 											type="button"
 											class="lt-ov__name-button"
@@ -512,6 +540,19 @@
 	}
 	.lt-ov__name-cell {
 		text-align: left;
+		border-left: 3px solid transparent;
+	}
+	.lt-ov__name-cell--overdue {
+		border-left-color: var(--text-error);
+	}
+	.lt-ov__name-cell--approaching {
+		border-left-color: var(--text-warning);
+	}
+	.lt-ov__name-cell--never {
+		border-left-color: var(--text-faint);
+	}
+	.lt-ov__name-cell--ok {
+		border-left-color: var(--text-success, var(--interactive-accent));
 	}
 	.lt-ov__name-button {
 		display: flex;

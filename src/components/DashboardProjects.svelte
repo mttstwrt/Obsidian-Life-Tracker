@@ -4,6 +4,7 @@
 		type DashboardSummaries,
 		type ProjectSummary,
 		applyOrder,
+		projectFreshnessStatus,
 	} from "../data/dashboard";
 	import type {
 		Event as TrackerEvent,
@@ -92,14 +93,6 @@
 		);
 	}
 
-	function projectStatus(
-		p: ProjectSummary,
-	): "never" | "ok" | "approaching" | "overdue" {
-		if (p.daysSince === null) return "never";
-		if (p.isDormant) return "overdue";
-		if (p.daysSince >= p.dormantAfterDays * 0.8) return "approaching";
-		return "ok";
-	}
 </script>
 
 <div class="lt-proj">
@@ -168,7 +161,7 @@
 							{now}
 							intervalDays={p.dormantAfterDays}
 							windowDays={Math.max(30, p.dormantAfterDays * 4)}
-							status={projectStatus(p)}
+							status={projectFreshnessStatus(p)}
 						/>
 					</div>
 

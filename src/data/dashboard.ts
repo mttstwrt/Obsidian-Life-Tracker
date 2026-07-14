@@ -337,6 +337,13 @@ export function summarizeMaintenance(
 	};
 }
 
+export function projectFreshnessStatus(p: ProjectSummary): FreshnessStatus {
+	if (p.daysSince === null) return "never";
+	if (p.isDormant) return "overdue";
+	if (p.daysSince >= p.dormantAfterDays * 0.8) return "approaching";
+	return "ok";
+}
+
 export function summarizeProject(
 	def: ProjectDefinition,
 	events: Event[],
