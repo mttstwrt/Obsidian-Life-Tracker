@@ -61,6 +61,21 @@ export class LifeTrackerSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Auto-log from daily note checkboxes")
+			.setDesc(
+				"When on, checking a planned line under the plan heading logs the matching event, and unchecking it removes the auto-logged event. Turn off if a sync tool rewriting daily notes causes duplicate events.",
+			)
+			.addToggle((t) =>
+				t
+					.setValue(this.plugin.settings.autoLogFromDailyNotes)
+					.onChange(async (v) => {
+						this.plugin.settings.autoLogFromDailyNotes = v;
+						await this.plugin.saveSettings();
+						if (v) await this.plugin.resnapshotPlanChecks();
+					}),
+			);
+
+		new Setting(containerEl)
 			.setName("Record unplanned events in daily note")
 			.setDesc(
 				"When on, logging an event also writes a checked entry into that day's daily note (under the plan heading) if no matching planned line exists. When off, only existing planned lines get ticked.",

@@ -101,6 +101,33 @@ fieldSchema:
 
 You can read, search, and edit these files directly — Life Tracker will pick up your changes on next load. Events are appended with targeted edits (never full-file rewrites), which keeps Obsidian Sync conflicts to a minimum.
 
+## Agent & AI integration
+
+Life Tracker is built to be driven by other tools — a calendar plugin, an analytics dashboard, or an AI agent that logs and reviews your activity. There are two integration surfaces, both documented in full in [`docs/integration.md`](docs/integration.md):
+
+- **The file contract** — everything lives in plain markdown (see [How your data is stored](#how-your-data-is-stored)). Any consumer can read definitions and events straight from the vault, even when Life Tracker is disabled. This is the canonical surface for decoupled, read-only integrations.
+- **The runtime API** — an in-process, versioned surface on the plugin instance for co-installed plugins that need *safe writes* or *computed summaries* (streaks, freshness, period progress). Writes should go through it: ULID generation, field coercion, daily-note mirroring, and cache invalidation all live in the plugin runtime and are easy to get wrong from outside.
+
+### Connecting an agent
+
+There is **no standalone MCP server** — Life Tracker doesn't run a background process or open a port. Instead, a co-installed Obsidian plugin (the reference consumer is the *vault-assistant* AI agent) reaches the API directly on the plugin instance:
+
+```ts
+const lt = app.plugins.plugins["obsidian-life-tracker"] as
+  | { api?: LifeTrackerApi }
+  | undefined;
+if (!lt?.api) return;              // plugin missing or disabled — fall back to the file contract
+if (!lt.api.version.startsWith("1.")) warnIncompatible(lt.api.version);
+
+const summaries = await lt.api.invoke("get_summaries", {});
+```
+
+The API exposes **MCP-shaped tool descriptors** (`name` / `description` / `inputSchema`), so they map 1:1 onto MCP or OpenAI tool schemas — hand them straight to a language model. `invoke` never throws and always resolves to a JSON string; failures come back as `{"error": "..."}`, a shape designed for a language-model consumer.
+
+v1 tools: `list_definitions`, `query_events`, `get_summaries`, `log_event`, `edit_event`, `delete_event`, `plan_item`, `create_definition`.
+
+Prefer the API for writes (`log_event` runs the same path as the UI — dedup, coercion, daily-note mirror) and for computed status (`get_summaries`); use the file contract for decoupled reads. See [`docs/integration.md`](docs/integration.md) for the full contract, a read-only consumer reference implementation, and versioning guarantees.
+
 ## Status
 
 Life Tracker is in early development (v0.1.x). Core logging, dashboards, the sidebar, and daily-note sync are working. Expect rough edges around analytics and mobile UX. Issues and feedback welcome.

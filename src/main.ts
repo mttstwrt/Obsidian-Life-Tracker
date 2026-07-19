@@ -51,6 +51,7 @@ export type OrderTabKey = "habits" | "counters" | "maintenance" | "projects";
 interface LifeTrackerSettings {
 	rootFolder: string;
 	planHeading: string;
+	autoLogFromDailyNotes: boolean;
 	recentDefinitionIds: string[];
 	quickLogIds: string[];
 	definitionOrder: Record<OrderTabKey, string[]>;
@@ -63,6 +64,7 @@ interface LifeTrackerSettings {
 const DEFAULT_SETTINGS: LifeTrackerSettings = {
 	rootFolder: "LifeTracker",
 	planHeading: "Timeline",
+	autoLogFromDailyNotes: true,
 	recentDefinitionIds: [],
 	quickLogIds: [],
 	definitionOrder: { habits: [], counters: [], maintenance: [], projects: [] },
@@ -245,7 +247,9 @@ export default class LifeTrackerPlugin extends Plugin {
 		);
 
 		this.app.workspace.onLayoutReady(() => {
-			void this.snapshotExistingPlanChecks();
+			if (this.settings.autoLogFromDailyNotes) {
+				void this.snapshotExistingPlanChecks();
+			}
 		});
 	}
 
@@ -490,6 +494,17 @@ export default class LifeTrackerPlugin extends Plugin {
 		setting.openTabById(this.manifest.id);
 	}
 
+	/**
+	 * Re-baseline the modify watcher's processed-key set from the vault's current
+	 * state. Must run when auto-logging is toggled back on mid-session: lines
+	 * checked while the feature was off would otherwise register as fresh checks
+	 * and get mass auto-logged on the next daily-note modify.
+	 */
+	async resnapshotPlanChecks(): Promise<void> {
+		this.processedPlanKeys.clear();
+		await this.snapshotExistingPlanChecks();
+	}
+
 	private async snapshotExistingPlanChecks(): Promise<void> {
 		const config = resolveDailyNoteConfig(this.app);
 		const heading = this.settings.planHeading;
@@ -508,6 +523,7 @@ export default class LifeTrackerPlugin extends Plugin {
 	}
 
 	private async handleDailyNoteModify(file: TFile): Promise<void> {
+		if (!this.settings.autoLogFromDailyNotes) return;
 		const config = resolveDailyNoteConfig(this.app);
 		const date = parseDailyNoteDateForApp(file.path, config);
 		if (!date) return;
