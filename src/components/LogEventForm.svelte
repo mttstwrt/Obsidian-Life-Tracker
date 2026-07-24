@@ -90,6 +90,26 @@
 	let submitting = $state(false);
 	let confirmStage = $state(false);
 
+	// Obsidian marks mobile with a body class. On mobile the on-screen keyboard
+	// covers the lower half of the modal, so we reveal the focused field above
+	// it (see revealOnFocus) and pad the form bottom to leave room to scroll.
+	const isMobile =
+		typeof document !== "undefined" &&
+		document.body.classList.contains("is-mobile");
+
+	function revealOnFocus(e: FocusEvent) {
+		if (!isMobile) return;
+		const target = e.target as HTMLElement | null;
+		if (!target) return;
+		const tag = target.tagName;
+		if (tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT") return;
+		// Wait for the keyboard to finish animating in before scrolling, so we
+		// measure against the shrunken viewport rather than the old one.
+		window.setTimeout(() => {
+			target.scrollIntoView({ block: "center", behavior: "smooth" });
+		}, 250);
+	}
+
 	function addMinutesToTime(time: string, minutes: number): string {
 		const m = /^(\d{2}):(\d{2})$/.exec(time);
 		if (!m || !Number.isFinite(minutes) || minutes <= 0) return time;
@@ -279,7 +299,7 @@
 	}
 </script>
 
-<div class="lt-form">
+<div class="lt-form" class:lt-form--mobile={isMobile} onfocusin={revealOnFocus}>
 	<header class="lt-form__header">
 		<span class="lt-form__emoji" aria-hidden="true"
 			>{definition.emoji ?? "•"}</span
@@ -507,6 +527,11 @@
 		flex-direction: column;
 		gap: 0.75rem;
 		min-width: min(420px, 90vw);
+	}
+	/* Leave room to scroll the focused field above the on-screen keyboard,
+	   which otherwise covers the lower fields with no way to reveal them. */
+	.lt-form--mobile {
+		padding-bottom: 45vh;
 	}
 	.lt-form__body {
 		display: flex;

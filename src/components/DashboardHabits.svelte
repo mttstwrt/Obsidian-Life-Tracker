@@ -47,11 +47,23 @@
 
 	$effect(() => {
 		void gridWidth; // re-measure on container resize
-		const dayTh = dayThs[0];
-		if (nameTh && periodTh && dayTh) {
-			fixedColsWidth = nameTh.offsetWidth + periodTh.offsetWidth;
-			dayColWidth = dayTh.offsetWidth;
+		if (!nameTh || !periodTh) return;
+		// Measure a *visible* day column. On mobile the older day columns are
+		// hidden (display:none), so their offsetWidth reads 0 — measuring the
+		// first column there would defeat the fit calc and freeze the grid at
+		// the fallback width, overflowing the viewport. Walk from the end to
+		// the first rendered day header.
+		let dayTh: HTMLTableCellElement | undefined;
+		for (let i = dayThs.length - 1; i >= 0; i--) {
+			const th = dayThs[i];
+			if (th && th.offsetWidth > 0) {
+				dayTh = th;
+				break;
+			}
 		}
+		if (!dayTh) return;
+		fixedColsWidth = nameTh.offsetWidth + periodTh.offsetWidth;
+		dayColWidth = dayTh.offsetWidth;
 	});
 
 	const dayCount = $derived.by(() => {
@@ -64,7 +76,9 @@
 		const fit = Math.floor(
 			(gridWidth - fixedColsWidth - buffer) / dayColWidth,
 		);
-		return Math.max(7, Math.min(HABITS_GRID_LENGTH, fit));
+		// Let the measured fit govern so the grid never overflows; a low floor
+		// only guards against a degenerate view on very narrow screens.
+		return Math.max(5, Math.min(HABITS_GRID_LENGTH, fit));
 	});
 
 	const dates = $derived(gridDates(now, dayCount));
