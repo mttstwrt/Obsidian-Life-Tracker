@@ -3,6 +3,7 @@ import {
 	emptyDefinitionOrder,
 	mergeDefinitionOrder,
 	normalizeDefinitionOrder,
+	reorderWithin,
 } from "../definitionOrder";
 
 describe("normalizeDefinitionOrder", () => {
@@ -111,5 +112,51 @@ describe("mergeDefinitionOrder", () => {
 			maintenance: [],
 			projects: ["p1"],
 		});
+	});
+});
+
+describe("reorderWithin", () => {
+	test("reorders a whole list when the group is everything", () => {
+		expect(reorderWithin(["a", "b", "c"], ["c", "a", "b"])).toEqual([
+			"c",
+			"a",
+			"b",
+		]);
+	});
+
+	test("leaves filtered-out ids in their original slots", () => {
+		// The tab stores a,b,c,d; a tag filter is hiding b and d, and the user
+		// dragged c above a. b and d must not move or vanish.
+		expect(reorderWithin(["a", "b", "c", "d"], ["c", "a"])).toEqual([
+			"c",
+			"b",
+			"a",
+			"d",
+		]);
+	});
+
+	test("reordering reverse habits leaves plain habits untouched", () => {
+		// Overview renders these as two groups over one `habits` key.
+		const full = ["h1", "r1", "h2", "r2"];
+		expect(reorderWithin(full, ["r2", "r1"])).toEqual(["h1", "r2", "h2", "r1"]);
+		expect(reorderWithin(full, ["h2", "h1"])).toEqual(["h2", "r1", "h1", "r2"]);
+	});
+
+	test("appends group ids the stored order has never seen", () => {
+		expect(reorderWithin(["a"], ["a", "new"])).toEqual(["a", "new"]);
+		expect(reorderWithin([], ["x", "y"])).toEqual(["x", "y"]);
+	});
+
+	test("is a no-op when the group order is unchanged", () => {
+		const full = ["a", "b", "c"];
+		expect(reorderWithin(full, ["a", "c"])).toEqual(full);
+	});
+
+	test("keeps ids whose definitions are gone from the current view", () => {
+		expect(reorderWithin(["stale", "a", "b"], ["b", "a"])).toEqual([
+			"stale",
+			"b",
+			"a",
+		]);
 	});
 });

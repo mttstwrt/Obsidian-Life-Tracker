@@ -15,6 +15,7 @@
 	import Sparkline from "./charts/Sparkline.svelte";
 	import FieldChart from "./charts/FieldChart.svelte";
 	import FreshnessTimeline from "./charts/FreshnessTimeline.svelte";
+	import { reorderable } from "./reorderable";
 
 	type Filter = "active" | "dormant" | "archived" | "all";
 
@@ -106,23 +107,25 @@
 				<option value="all">All</option>
 			</select>
 		</label>
-		<button
-			type="button"
-			class="lt-reorder-trigger"
-			title="Reorder projects"
-			onclick={() => plugin.openReorderModal("projects")}
-		>
-			↕ Reorder
-		</button>
 	</div>
 
 	{#if filtered.length === 0}
 		<p class="lt-proj__empty">No projects to show.</p>
 	{:else}
-		<ul class="lt-proj__list">
+		<ul
+			class="lt-proj__list"
+			use:reorderable={{
+				onReorder: (tab, ids) => plugin.reorderDefinitions(tab, ids),
+			}}
+		>
 			{#each filtered as p (p.definition.id)}
-				<li class="lt-proj__row" class:dormant={p.isDormant}>
-					<div class="lt-proj__head">
+				<li
+					data-lt-id={p.definition.id}
+					data-lt-tab="projects"
+					class="lt-proj__row"
+					class:dormant={p.isDormant}
+				>
+					<div class="lt-proj__head" data-lt-handle>
 						<button
 							type="button"
 							class="lt-proj__name"
@@ -288,19 +291,6 @@
 	}
 	.lt-proj__filter span {
 		color: var(--text-muted);
-	}
-	.lt-reorder-trigger {
-		background: transparent;
-		border: none;
-		color: var(--text-faint);
-		font-size: 0.75rem;
-		padding: 0.2rem 0.4rem;
-		cursor: pointer;
-		border-radius: 0.25rem;
-	}
-	.lt-reorder-trigger:hover {
-		color: var(--interactive-accent);
-		background: var(--background-modifier-hover);
 	}
 	.lt-proj__empty {
 		color: var(--text-muted);

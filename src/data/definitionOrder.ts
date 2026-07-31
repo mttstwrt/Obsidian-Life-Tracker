@@ -80,3 +80,33 @@ export function mergeDefinitionOrder(
 	})[changed.tab];
 	return merged;
 }
+
+/**
+ * Rewrite only the positions held by `groupNewOrder` within `full`, leaving
+ * every other id where it sat.
+ *
+ * A drag never sees a whole tab. The Overview renders habits and reverse habits
+ * as two separate groups sharing the single `habits` order key, and the Habits,
+ * Projects and Overview tabs all apply filters that hide rows. Committing just
+ * the dragged group's ids would drop everything currently filtered out, so
+ * instead the group's ids are slotted back into the positions they already
+ * occupied. Ids in the group that `full` has never seen are appended.
+ */
+export function reorderWithin(
+	full: string[],
+	groupNewOrder: string[],
+): string[] {
+	const group = new Set(groupNewOrder);
+	const queue = [...groupNewOrder];
+	const out: string[] = [];
+	for (const id of full) {
+		if (!group.has(id)) {
+			out.push(id);
+			continue;
+		}
+		const next = queue.shift();
+		if (next !== undefined) out.push(next);
+	}
+	out.push(...queue);
+	return out;
+}
