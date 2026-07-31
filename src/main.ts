@@ -9,6 +9,15 @@ import { mount, unmount } from "svelte";
 import CodeBlockView from "./components/CodeBlockView.svelte";
 import { DataLayer } from "./data/dataLayer";
 import {
+	type DefinitionOrder,
+	emptyDefinitionOrder,
+	mergeDefinitionOrder,
+	normalizeDefinitionOrder,
+	ORDER_TAB_KEYS,
+	type OrderTabKey,
+	reorderWithin,
+} from "./data/definitionOrder";
+import {
 	formatPlanLine,
 	parseCheckedPlanLines,
 	parseUncheckedPlanLines,
@@ -41,12 +50,12 @@ import { DefinitionFormModal } from "./views/DefinitionFormModal";
 import { EventDetailModal } from "./views/EventDetailModal";
 import { LogEventModal, type LogMode } from "./views/LogEventModal";
 import { PickDefinitionModal } from "./views/PickDefinitionModal";
-import { ReorderModal, type ReorderItem } from "./views/ReorderModal";
 import { LifeTrackerSettingTab } from "./views/SettingsTab";
 import { showUndoableLogNotice } from "./views/undoLogNotice";
 import "virtual:uno.css";
+import "./styles/reorderable.css";
 
-export type OrderTabKey = "habits" | "counters" | "maintenance" | "projects";
+export type { OrderTabKey };
 
 interface LifeTrackerSettings {
 	rootFolder: string;
@@ -54,7 +63,7 @@ interface LifeTrackerSettings {
 	autoLogFromDailyNotes: boolean;
 	recentDefinitionIds: string[];
 	quickLogIds: string[];
-	definitionOrder: Record<OrderTabKey, string[]>;
+	definitionOrder: DefinitionOrder;
 	habitWindowMode: "calendar" | "rolling";
 	recordUnplannedEvents: boolean;
 	linkActivitiesToDefinitions: boolean;
@@ -67,7 +76,7 @@ const DEFAULT_SETTINGS: LifeTrackerSettings = {
 	autoLogFromDailyNotes: true,
 	recentDefinitionIds: [],
 	quickLogIds: [],
-	definitionOrder: { habits: [], counters: [], maintenance: [], projects: [] },
+	definitionOrder: emptyDefinitionOrder(),
 	habitWindowMode: "calendar",
 	recordUnplannedEvents: true,
 	linkActivitiesToDefinitions: false,
@@ -98,18 +107,36 @@ export default class LifeTrackerPlugin extends Plugin {
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-		this.settings.definitionOrder = {
-			...DEFAULT_SETTINGS.definitionOrder,
-			...(this.settings.definitionOrder ?? {}),
-		};
+		this.settings.definitionOrder = normalizeDefinitionOrder(
+			this.settings.definitionOrder,
+		);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
 
+	/**
+	 * Obsidian calls this when `data.json` changes on disk underneath the running
+	 * plugin — which is exactly what Sync does when it pulls a reorder made on
+	 * another device. Without it the in-memory settings stay stale until a full
+	 * restart, and the next `saveSettings()` would write the old order straight
+	 * back over the one that just synced in.
+	 */
+	async onExternalSettingsChange(): Promise<void> {
+		await this.loadSettings();
+		this.refreshDashboards();
+	}
+
 	async setDefinitionOrder(tab: OrderTabKey, ids: string[]): Promise<void> {
-		this.settings.definitionOrder[tab] = ids;
+		// Re-read first: `data.json` is a whole-file write, so rebasing onto disk
+		// keeps a reorder synced in for a *different* tab from being clobbered by
+		// this device's stale copy of it.
+		this.settings.definitionOrder = mergeDefinitionOrder(
+			(await this.loadData())?.definitionOrder,
+			this.settings.definitionOrder,
+			{ tab, ids },
+		);
 		await this.saveSettings();
 		this.refreshDashboards();
 	}
@@ -125,7 +152,12 @@ export default class LifeTrackerPlugin extends Plugin {
 		}
 	}
 
-	async openReorderModal(tab: OrderTabKey): Promise<void> {
+	/**
+	 * Every definition on `tab`, in the order the dashboard currently shows them.
+	 * Used as the baseline a drag is spliced into, so the stored order always
+	 * names the whole tab even when the drag only saw a filtered subset.
+	 */
+	private async tabOrderBaseline(tab: OrderTabKey): Promise<string[]> {
 		const { definitions } = await this.data.loadDefinitions();
 		const tabKinds: Record<OrderTabKey, Definition["kind"][]> = {
 			habits: ["habit", "reverse-habit"],
@@ -134,9 +166,9 @@ export default class LifeTrackerPlugin extends Plugin {
 			projects: ["project"],
 		};
 		const allowed = new Set(tabKinds[tab]);
-		const tabDefs = definitions.filter(
-			(d) => d.status === "active" && allowed.has(d.kind),
-		);
+		// Every status, not just active: the Projects tab can show archived and
+		// dormant rows, and those are draggable too.
+		const tabDefs = definitions.filter((d) => allowed.has(d.kind));
 		const order = this.settings.definitionOrder[tab] ?? [];
 		const idx = new Map(order.map((id, i) => [id, i]));
 		tabDefs.sort((a, b) => {
@@ -147,25 +179,19 @@ export default class LifeTrackerPlugin extends Plugin {
 			if (bi !== undefined) return 1;
 			return a.displayName.localeCompare(b.displayName);
 		});
-		const items: ReorderItem[] = tabDefs.map((d) => ({
-			id: d.id,
-			label: d.displayName,
-			emoji: d.emoji,
-			hint: d.kind === "reverse-habit" ? "reverse" : undefined,
-		}));
-		const titles: Record<OrderTabKey, string> = {
-			habits: "Reorder habits",
-			counters: "Reorder counters",
-			maintenance: "Reorder maintenance",
-			projects: "Reorder projects",
-		};
-		new ReorderModal(this.app, {
-			title: titles[tab],
-			items,
-			onSave: async (ids) => {
-				await this.setDefinitionOrder(tab, ids);
-			},
-		}).open();
+		return tabDefs.map((d) => d.id);
+	}
+
+	/**
+	 * Commit a drag. `displayedIds` is only the group that was dragged — one
+	 * Overview section, or a tag-filtered slice of a tab — so it is spliced into
+	 * the tab's full order rather than replacing it.
+	 */
+	async reorderDefinitions(tab: string, displayedIds: string[]): Promise<void> {
+		if (!ORDER_TAB_KEYS.includes(tab as OrderTabKey)) return;
+		const key = tab as OrderTabKey;
+		const baseline = await this.tabOrderBaseline(key);
+		await this.setDefinitionOrder(key, reorderWithin(baseline, displayedIds));
 	}
 
 	rebuildDataLayer(): void {

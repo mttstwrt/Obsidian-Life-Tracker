@@ -11,6 +11,8 @@
 	} from "../data/dashboard";
 	import { eventsByDate, toneColor } from "../data/visualizations";
 	import { TagDayModal, type TagDayEntry } from "../views/TagDayModal";
+	import type { OrderTabKey } from "../data/definitionOrder";
+	import { reorderable } from "./reorderable";
 
 	let {
 		summaries,
@@ -110,6 +112,14 @@
 	interface OverviewGroup {
 		label: string;
 		rows: OverviewRow[];
+		/** Which order key a drag in this group commits to. */
+		tab: OrderTabKey;
+		/**
+		 * Drag boundary. Habits and reverse habits share the `habits` order key
+		 * but render as separate groups, so they need distinct boundaries to stay
+		 * undraggable into one another.
+		 */
+		group: string;
 	}
 
 	const groups: OverviewGroup[] = $derived.by(() => {
@@ -136,7 +146,8 @@
 							? ("approaching" as const)
 							: ("ok" as const),
 		}));
-		if (habits.length) out.push({ label: "Habits", rows: habits });
+		if (habits.length)
+			out.push({ label: "Habits", rows: habits, tab: "habits", group: "habits" });
 
 		const reverse: OverviewRow[] = applyOrder(
 			summaries.reverseHabits,
@@ -159,7 +170,13 @@
 			freshness: r.daysSince === null ? ("never" as const) : undefined,
 			freshnessColor: r.daysSince === null ? undefined : toneColor(r.tone),
 		}));
-		if (reverse.length) out.push({ label: "Reverse habits", rows: reverse });
+		if (reverse.length)
+			out.push({
+				label: "Reverse habits",
+				rows: reverse,
+				tab: "habits",
+				group: "reverse",
+			});
 
 		const maint: OverviewRow[] = applyOrder(
 			summaries.maintenance,
@@ -178,7 +195,13 @@
 			statusLabel: `every ${m.definition.intervalDays}d`,
 			freshness: m.status,
 		}));
-		if (maint.length) out.push({ label: "Maintenance", rows: maint });
+		if (maint.length)
+			out.push({
+				label: "Maintenance",
+				rows: maint,
+				tab: "maintenance",
+				group: "maintenance",
+			});
 
 		const projects: OverviewRow[] = applyOrder(
 			summaries.projects,
@@ -199,7 +222,13 @@
 			statusLabel: `${p.eventsLast30} in 30d`,
 			freshness: projectFreshnessStatus(p),
 		}));
-		if (projects.length) out.push({ label: "Projects", rows: projects });
+		if (projects.length)
+			out.push({
+				label: "Projects",
+				rows: projects,
+				tab: "projects",
+				group: "projects",
+			});
 
 		const counters: OverviewRow[] = applyOrder(
 			summaries.counters,
@@ -212,7 +241,13 @@
 			statusTone: undefined,
 			statusLabel: c.periodLabel,
 		}));
-		if (counters.length) out.push({ label: "Counters", rows: counters });
+		if (counters.length)
+			out.push({
+				label: "Counters",
+				rows: counters,
+				tab: "counters",
+				group: "counters",
+			});
 
 		return out;
 	});
@@ -332,7 +367,12 @@
 						{/each}
 					</tr>
 				</thead>
-				<tbody>
+				<tbody
+					use:reorderable={{
+						onReorder: (tab, ids) => plugin.reorderDefinitions(tab, ids),
+						disabled: mode !== "definitions",
+					}}
+				>
 					{#if mode === "definitions"}
 						{#each groups as group (group.label)}
 							<tr class="lt-ov__group-row">
@@ -346,9 +386,14 @@
 							</tr>
 							{#each group.rows as row (row.definition.id)}
 								{@const counts = countsByDefinition.get(row.definition.id)}
-								<tr>
+								<tr
+									data-lt-id={row.definition.id}
+									data-lt-tab={group.tab}
+									data-lt-group={group.group}
+								>
 									<th
 										scope="row"
+										data-lt-handle
 										class="lt-ov__name-cell"
 										class:lt-ov__name-cell--never={row.freshness === "never"}
 										class:lt-ov__name-cell--approaching={row.freshness ===

@@ -8,6 +8,7 @@
 	import type { Event as TrackerEvent } from "../data/types";
 	import { eventsByWeek } from "../data/visualizations";
 	import Sparkline from "./charts/Sparkline.svelte";
+	import { reorderable } from "./reorderable";
 
 	let {
 		summaries,
@@ -53,19 +54,18 @@
 	{#if counters.length === 0}
 		<p class="lt-counter__empty">No counters yet.</p>
 	{:else}
-		<div class="lt-counter__toolbar">
-			<button
-				type="button"
-				class="lt-reorder-trigger"
-				title="Reorder counters"
-				onclick={() => plugin.openReorderModal("counters")}
-			>
-				↕ Reorder
-			</button>
-		</div>
-		<ul class="lt-counter__list">
+		<ul
+			class="lt-counter__list"
+			use:reorderable={{
+				onReorder: (tab, ids) => plugin.reorderDefinitions(tab, ids),
+			}}
+		>
 			{#each counters as c (c.definition.id)}
-				<li class="lt-counter__row">
+				<li
+					data-lt-id={c.definition.id}
+					data-lt-tab="counters"
+					class="lt-counter__row"
+				>
 					<button
 						type="button"
 						class="lt-counter__name"
@@ -139,23 +139,6 @@
 	.lt-counter__empty {
 		color: var(--text-muted);
 		font-style: italic;
-	}
-	.lt-counter__toolbar {
-		display: flex;
-		justify-content: flex-end;
-	}
-	.lt-reorder-trigger {
-		background: transparent;
-		border: none;
-		color: var(--text-faint);
-		font-size: 0.75rem;
-		padding: 0.2rem 0.4rem;
-		cursor: pointer;
-		border-radius: 0.25rem;
-	}
-	.lt-reorder-trigger:hover {
-		color: var(--interactive-accent);
-		background: var(--background-modifier-hover);
 	}
 	.lt-counter__list {
 		list-style: none;

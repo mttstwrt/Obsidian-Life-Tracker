@@ -7,6 +7,7 @@
 	} from "../data/dashboard";
 	import type { Event as TrackerEvent } from "../data/types";
 	import FreshnessTimeline from "./charts/FreshnessTimeline.svelte";
+	import { reorderable } from "./reorderable";
 
 	let {
 		summaries,
@@ -61,19 +62,16 @@
 			No maintenance items yet. Use “New definition” to create one.
 		</p>
 	{:else}
-		<div class="lt-maint__toolbar">
-			<button
-				type="button"
-				class="lt-reorder-trigger"
-				title="Reorder maintenance"
-				onclick={() => plugin.openReorderModal("maintenance")}
-			>
-				↕ Reorder
-			</button>
-		</div>
-		<ul class="lt-maint__list">
+		<ul
+			class="lt-maint__list"
+			use:reorderable={{
+				onReorder: (tab, ids) => plugin.reorderDefinitions(tab, ids),
+			}}
+		>
 			{#each sorted as m (m.definition.id)}
 				<li
+					data-lt-id={m.definition.id}
+					data-lt-tab="maintenance"
 					class="lt-maint__row"
 					class:overdue={m.status === "overdue"}
 					class:approaching={m.status === "approaching"}
@@ -133,23 +131,6 @@
 	.lt-maint__empty {
 		color: var(--text-muted);
 		font-style: italic;
-	}
-	.lt-maint__toolbar {
-		display: flex;
-		justify-content: flex-end;
-	}
-	.lt-reorder-trigger {
-		background: transparent;
-		border: none;
-		color: var(--text-faint);
-		font-size: 0.75rem;
-		padding: 0.2rem 0.4rem;
-		cursor: pointer;
-		border-radius: 0.25rem;
-	}
-	.lt-reorder-trigger:hover {
-		color: var(--interactive-accent);
-		background: var(--background-modifier-hover);
 	}
 	.lt-maint__list {
 		list-style: none;

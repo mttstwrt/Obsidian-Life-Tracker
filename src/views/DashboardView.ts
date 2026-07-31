@@ -34,6 +34,13 @@ export class DashboardView extends ItemView {
 	}
 
 	async onOpen(): Promise<void> {
+		// Belt-and-braces for cross-device ordering: `onExternalSettingsChange` is
+		// the intended signal when Sync rewrites data.json, but it doesn't fire
+		// reliably on every platform. Re-reading here covers the common flow of
+		// picking up the other device and opening the dashboard. Safe because every
+		// settings mutation saves immediately, so disk is never behind memory.
+		await this.plugin.loadSettings();
+
 		this.contentEl.empty();
 		this.contentEl.addClass("life-tracker-dashboard");
 

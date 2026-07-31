@@ -10,6 +10,7 @@
 	} from "../data/dashboard";
 	import MilestoneTimeline from "./charts/MilestoneTimeline.svelte";
 	import { toneColor } from "../data/visualizations";
+	import { reorderable } from "./reorderable";
 
 	let {
 		summaries,
@@ -162,16 +163,7 @@
 			<table class="lt-habits__grid">
 				<thead>
 					<tr>
-						<th class="lt-habits__name-col" bind:this={nameTh}>
-							<button
-								type="button"
-								class="lt-habits__header-button"
-								title="Reorder habits"
-								onclick={() => plugin.openReorderModal("habits")}
-							>
-								Habit
-							</button>
-						</th>
+						<th class="lt-habits__name-col" bind:this={nameTh}>Habit</th>
 						<th class="lt-habits__period-col" bind:this={periodTh}>Period</th>
 						{#each dates as d, i (d)}
 							<th
@@ -187,10 +179,18 @@
 						{/each}
 					</tr>
 				</thead>
-				<tbody>
+				<tbody
+					use:reorderable={{
+						onReorder: (tab, ids) => plugin.reorderDefinitions(tab, ids),
+					}}
+				>
 					{#each filteredHabits as h (h.definition.id)}
-						<tr>
-							<th scope="row" class="lt-habits__name-cell">
+						<tr
+							data-lt-id={h.definition.id}
+							data-lt-tab="habits"
+							data-lt-group="habits"
+						>
+							<th scope="row" class="lt-habits__name-cell" data-lt-handle>
 								<button
 									type="button"
 									class="lt-habits__name-button"
@@ -251,8 +251,13 @@
 					{/each}
 
 					{#each filteredReverse as r (r.definition.id)}
-						<tr class="lt-habits__row--reverse">
-							<th scope="row" class="lt-habits__name-cell">
+						<tr
+							data-lt-id={r.definition.id}
+							data-lt-tab="habits"
+							data-lt-group="reverse"
+							class="lt-habits__row--reverse"
+						>
+							<th scope="row" class="lt-habits__name-cell" data-lt-handle>
 								<button
 									type="button"
 									class="lt-habits__name-button"
@@ -349,18 +354,6 @@
 		text-align: left;
 		min-width: 9rem;
 		padding-right: 0.4rem;
-	}
-	.lt-habits__header-button {
-		background: transparent;
-		border: none;
-		padding: 0;
-		font: inherit;
-		color: inherit;
-		cursor: pointer;
-		text-align: left;
-	}
-	.lt-habits__header-button:hover {
-		color: var(--interactive-accent);
 	}
 	.lt-habits__period-col {
 		min-width: 3rem;

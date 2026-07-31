@@ -1,0 +1,42 @@
+/**
+ * Styles for the long-press drag reorder action (src/components/reorderable.ts).
+ *
+ * Global rather than component-scoped: the action toggles these classes on
+ * elements imperatively, so Svelte's scoping hash is never applied to them.
+ */
+
+/* Suppress the iOS long-press callout on anything holdable. */
+[data-lt-id] {
+	-webkit-touch-callout: none;
+}
+
+/* Only while a drag is live, so text stays selectable the rest of the time. */
+.lt-reorder-active {
+	cursor: grabbing;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.lt-reorder-lifted {
+	opacity: 0.6;
+	background: var(--background-modifier-hover);
+}
+
+/*
+ * Drop indicator. `tr` ignores box-shadow in some engines, so the cell rules
+ * cover the grid tables and the element rule covers the flat `<li>` lists.
+ */
+.lt-reorder-drop-before {
+	box-shadow: inset 0 3px 0 0 var(--interactive-accent);
+}
+.lt-reorder-drop-after {
+	box-shadow: inset 0 -3px 0 0 var(--interactive-accent);
+}
+.lt-reorder-drop-before > td,
+.lt-reorder-drop-before > th {
+	box-shadow: inset 0 3px 0 0 var(--interactive-accent);
+}
+.lt-reorder-drop-after > td,
+.lt-reorder-drop-after > th {
+	box-shadow: inset 0 -3px 0 0 var(--interactive-accent);
+}
