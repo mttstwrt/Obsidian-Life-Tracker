@@ -9,6 +9,13 @@ import { mount, unmount } from "svelte";
 import CodeBlockView from "./components/CodeBlockView.svelte";
 import { DataLayer } from "./data/dataLayer";
 import {
+	type DefinitionOrder,
+	emptyDefinitionOrder,
+	mergeDefinitionOrder,
+	normalizeDefinitionOrder,
+	type OrderTabKey,
+} from "./data/definitionOrder";
+import {
 	formatPlanLine,
 	parseCheckedPlanLines,
 	parseUncheckedPlanLines,
@@ -46,7 +53,7 @@ import { LifeTrackerSettingTab } from "./views/SettingsTab";
 import { showUndoableLogNotice } from "./views/undoLogNotice";
 import "virtual:uno.css";
 
-export type OrderTabKey = "habits" | "counters" | "maintenance" | "projects";
+export type { OrderTabKey };
 
 interface LifeTrackerSettings {
 	rootFolder: string;
@@ -54,7 +61,7 @@ interface LifeTrackerSettings {
 	autoLogFromDailyNotes: boolean;
 	recentDefinitionIds: string[];
 	quickLogIds: string[];
-	definitionOrder: Record<OrderTabKey, string[]>;
+	definitionOrder: DefinitionOrder;
 	habitWindowMode: "calendar" | "rolling";
 	recordUnplannedEvents: boolean;
 	linkActivitiesToDefinitions: boolean;
@@ -67,7 +74,7 @@ const DEFAULT_SETTINGS: LifeTrackerSettings = {
 	autoLogFromDailyNotes: true,
 	recentDefinitionIds: [],
 	quickLogIds: [],
-	definitionOrder: { habits: [], counters: [], maintenance: [], projects: [] },
+	definitionOrder: emptyDefinitionOrder(),
 	habitWindowMode: "calendar",
 	recordUnplannedEvents: true,
 	linkActivitiesToDefinitions: false,
@@ -98,18 +105,36 @@ export default class LifeTrackerPlugin extends Plugin {
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-		this.settings.definitionOrder = {
-			...DEFAULT_SETTINGS.definitionOrder,
-			...(this.settings.definitionOrder ?? {}),
-		};
+		this.settings.definitionOrder = normalizeDefinitionOrder(
+			this.settings.definitionOrder,
+		);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
 
+	/**
+	 * Obsidian calls this when `data.json` changes on disk underneath the running
+	 * plugin — which is exactly what Sync does when it pulls a reorder made on
+	 * another device. Without it the in-memory settings stay stale until a full
+	 * restart, and the next `saveSettings()` would write the old order straight
+	 * back over the one that just synced in.
+	 */
+	async onExternalSettingsChange(): Promise<void> {
+		await this.loadSettings();
+		this.refreshDashboards();
+	}
+
 	async setDefinitionOrder(tab: OrderTabKey, ids: string[]): Promise<void> {
-		this.settings.definitionOrder[tab] = ids;
+		// Re-read first: `data.json` is a whole-file write, so rebasing onto disk
+		// keeps a reorder synced in for a *different* tab from being clobbered by
+		// this device's stale copy of it.
+		this.settings.definitionOrder = mergeDefinitionOrder(
+			(await this.loadData())?.definitionOrder,
+			this.settings.definitionOrder,
+			{ tab, ids },
+		);
 		await this.saveSettings();
 		this.refreshDashboards();
 	}

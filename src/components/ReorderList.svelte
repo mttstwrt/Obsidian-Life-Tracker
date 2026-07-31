@@ -14,6 +14,7 @@
 	// svelte-ignore state_referenced_locally
 	let order: ReorderItem[] = $state([...items]);
 	let draggingIndex: number | null = $state(null);
+	let listEl: HTMLOListElement | null = $state(null);
 
 	function move(from: number, to: number) {
 		if (to < 0 || to >= order.length || from === to) return;
@@ -23,22 +24,51 @@
 		order = next;
 	}
 
-	function onDragStart(e: DragEvent, i: number) {
-		draggingIndex = i;
-		if (e.dataTransfer) {
-			e.dataTransfer.effectAllowed = "move";
-			e.dataTransfer.setData("text/plain", String(i));
+	/**
+	 * Index of the row currently under the pointer, or null when it's past
+	 * either end of the list. Measured off the live DOM rather than a cached
+	 * rect list because rows shift as the drag reorders them.
+	 */
+	function indexAtY(y: number): number | null {
+		if (!listEl) return null;
+		const rows = listEl.querySelectorAll<HTMLElement>(".lt-reorder__row");
+		for (let i = 0; i < rows.length; i++) {
+			const rect = rows[i].getBoundingClientRect();
+			if (y >= rect.top && y <= rect.bottom) return i;
 		}
+		return null;
 	}
 
-	function onDragOver(e: DragEvent, i: number) {
-		if (draggingIndex === null || draggingIndex === i) return;
-		e.preventDefault();
-		move(draggingIndex, i);
+	// Pointer events rather than HTML5 drag-and-drop: dragstart/dragover never
+	// fire in Obsidian's mobile webview, so the old handlers made this desktop
+	// only. Pointer events cover mouse and touch through one code path.
+	function onPointerDown(e: PointerEvent, i: number) {
+		if (e.button > 0) return;
+		const target = e.target as HTMLElement;
+		if (target.closest("button")) return; // let the arrows do their own thing
+		// Touch drags start from the handle only, so a finger anywhere else on a
+		// row still scrolls the list instead of hijacking it into a reorder.
+		if (e.pointerType !== "mouse" && !target.closest(".lt-reorder__handle")) {
+			return;
+		}
 		draggingIndex = i;
+		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+		e.preventDefault();
 	}
 
-	function onDragEnd() {
+	function onPointerMove(e: PointerEvent) {
+		if (draggingIndex === null) return;
+		e.preventDefault();
+		const target = indexAtY(e.clientY);
+		if (target === null || target === draggingIndex) return;
+		move(draggingIndex, target);
+		draggingIndex = target;
+	}
+
+	function onPointerUp(e: PointerEvent) {
+		if (draggingIndex === null) return;
+		const el = e.currentTarget as HTMLElement;
+		if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
 		draggingIndex = null;
 	}
 
@@ -51,15 +81,15 @@
 	{#if order.length === 0}
 		<p class="lt-reorder__empty">Nothing to reorder yet.</p>
 	{:else}
-		<ol class="lt-reorder__list">
+		<ol class="lt-reorder__list" bind:this={listEl}>
 			{#each order as item, i (item.id)}
 				<li
 					class="lt-reorder__row"
 					class:lt-reorder__row--dragging={draggingIndex === i}
-					draggable="true"
-					ondragstart={(e) => onDragStart(e, i)}
-					ondragover={(e) => onDragOver(e, i)}
-					ondragend={onDragEnd}
+					onpointerdown={(e) => onPointerDown(e, i)}
+					onpointermove={onPointerMove}
+					onpointerup={onPointerUp}
+					onpointercancel={onPointerUp}
 				>
 					<span class="lt-reorder__handle" aria-hidden="true">⋮⋮</span>
 					{#if item.emoji}
@@ -140,6 +170,9 @@
 		border: 1px solid transparent;
 		cursor: grab;
 		user-select: none;
+		/* Suppress the long-press callout/selection bubble on iOS mid-drag. */
+		-webkit-user-select: none;
+		-webkit-touch-callout: none;
 	}
 	.lt-reorder__row:active {
 		cursor: grabbing;
@@ -153,6 +186,17 @@
 		font-size: 0.9rem;
 		letter-spacing: -2px;
 		flex-shrink: 0;
+		/* Keep the webview from claiming the gesture as a scroll before the
+		   pointermove handlers ever see it. */
+		touch-action: none;
+		/* Thumb-sized grab target; the glyph itself is only a few px wide. */
+		min-width: 1.9rem;
+		min-height: 2rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		margin: -0.45rem 0 -0.45rem -0.5rem;
+		cursor: grab;
 	}
 	.lt-reorder__emoji {
 		font-size: 1.1rem;
