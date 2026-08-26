@@ -490,3 +490,166 @@ describe("buildDefinitionFromInput — defaultDuration validation", () => {
 		expect(r.ok).toBe(false);
 	});
 });
+
+function score(
+	overrides: Partial<DefinitionFormInput> = {},
+): DefinitionFormInput {
+	return {
+		...emptyFormInput("score"),
+		displayName: "Sleep quality",
+		...overrides,
+	};
+}
+
+describe("buildDefinitionFromInput — score", () => {
+	test("defaults to a 1-10 scale with nothing else set", () => {
+		const r = buildDefinitionFromInput(score(), opts());
+		if (!r.ok) throw new Error(r.error);
+		if (r.definition.kind !== "score") throw new Error("kind");
+		expect(r.definition.scale).toEqual([1, 10]);
+		// The quiet defaults stay out of frontmatter entirely.
+		expect(r.definition.higherIsBetter).toBeUndefined();
+		expect(r.definition.dayAggregate).toBeUndefined();
+		expect(r.definition.target).toBeUndefined();
+		expect(r.definition.scaleLabels).toBeUndefined();
+		expect(r.definition.expectedCadence).toBeUndefined();
+	});
+
+	test("blank bounds fall back to the default scale", () => {
+		const r = buildDefinitionFromInput(
+			score({ scaleMin: "", scaleMax: "" }),
+			opts(),
+		);
+		if (!r.ok) throw new Error(r.error);
+		if (r.definition.kind !== "score") throw new Error("kind");
+		expect(r.definition.scale).toEqual([1, 10]);
+	});
+
+	test("accepts an adjusted scale", () => {
+		const r = buildDefinitionFromInput(
+			score({ scaleMin: "1", scaleMax: "5" }),
+			opts(),
+		);
+		if (!r.ok) throw new Error(r.error);
+		if (r.definition.kind !== "score") throw new Error("kind");
+		expect(r.definition.scale).toEqual([1, 5]);
+	});
+
+	test("carries the full option set through", () => {
+		const r = buildDefinitionFromInput(
+			score({
+				displayName: "Stress level",
+				scaleMin: "1",
+				scaleMax: "5",
+				scaleLabelLow: "calm",
+				scaleLabelHigh: "frazzled",
+				higherIsBetter: false,
+				dayAggregate: "max",
+				target: "3",
+				expectedCadence: "2/day",
+			}),
+			opts(),
+		);
+		if (!r.ok) throw new Error(r.error);
+		if (r.definition.kind !== "score") throw new Error("kind");
+		expect(r.definition.scale).toEqual([1, 5]);
+		expect(r.definition.scaleLabels).toEqual(["calm", "frazzled"]);
+		expect(r.definition.higherIsBetter).toBe(false);
+		expect(r.definition.dayAggregate).toBe("max");
+		expect(r.definition.target).toBe(3);
+		expect(r.definition.expectedCadence).toBe("2/day");
+	});
+
+	test("only one label still persists the pair", () => {
+		const r = buildDefinitionFromInput(
+			score({ scaleLabelLow: "awful", scaleLabelHigh: "" }),
+			opts(),
+		);
+		if (!r.ok) throw new Error(r.error);
+		if (r.definition.kind !== "score") throw new Error("kind");
+		expect(r.definition.scaleLabels).toEqual(["awful", ""]);
+	});
+
+	test("rejects a half-specified scale", () => {
+		expect(buildDefinitionFromInput(score({ scaleMax: "" }), opts()).ok).toBe(
+			false,
+		);
+		expect(buildDefinitionFromInput(score({ scaleMin: "" }), opts()).ok).toBe(
+			false,
+		);
+	});
+
+	test("rejects non-integer bounds", () => {
+		const r = buildDefinitionFromInput(
+			score({ scaleMin: "1", scaleMax: "7.5" }),
+			opts(),
+		);
+		expect(r.ok).toBe(false);
+	});
+
+	test("rejects an inverted or degenerate scale", () => {
+		expect(
+			buildDefinitionFromInput(score({ scaleMin: "10", scaleMax: "1" }), opts())
+				.ok,
+		).toBe(false);
+		expect(
+			buildDefinitionFromInput(score({ scaleMin: "5", scaleMax: "5" }), opts())
+				.ok,
+		).toBe(false);
+	});
+
+	test("rejects a target outside the scale", () => {
+		const r = buildDefinitionFromInput(
+			score({ scaleMin: "1", scaleMax: "5", target: "9" }),
+			opts(),
+		);
+		expect(r.ok).toBe(false);
+		if (r.ok) throw new Error("expected failure");
+		expect(r.field).toBe("target");
+	});
+
+	test("rejects a malformed expected cadence", () => {
+		const r = buildDefinitionFromInput(
+			score({ expectedCadence: "every morning" }),
+			opts(),
+		);
+		expect(r.ok).toBe(false);
+		if (r.ok) throw new Error("expected failure");
+		expect(r.field).toBe("expectedCadence");
+	});
+
+	test("round-trips through definitionToFormInput", () => {
+		const built = buildDefinitionFromInput(
+			score({
+				scaleMin: "0",
+				scaleMax: "4",
+				scaleLabelLow: "none",
+				scaleLabelHigh: "severe",
+				higherIsBetter: false,
+				dayAggregate: "last",
+				target: "1",
+				expectedCadence: "1/day",
+			}),
+			opts(),
+		);
+		if (!built.ok) throw new Error(built.error);
+
+		const back = buildDefinitionFromInput(
+			definitionToFormInput(built.definition),
+			opts({ existing: built.definition }),
+		);
+		if (!back.ok) throw new Error(back.error);
+		expect(back.definition).toEqual(built.definition);
+	});
+
+	test("a default-everything score round-trips too", () => {
+		const built = buildDefinitionFromInput(score(), opts());
+		if (!built.ok) throw new Error(built.error);
+		const back = buildDefinitionFromInput(
+			definitionToFormInput(built.definition),
+			opts({ existing: built.definition }),
+		);
+		if (!back.ok) throw new Error(back.error);
+		expect(back.definition).toEqual(built.definition);
+	});
+});

@@ -1,5 +1,7 @@
 import {
 	CURRENT_SCHEMA_VERSION,
+	DEFAULT_SCORE_DAY_AGGREGATE,
+	DEFAULT_SCORE_SCALE,
 	type Definition,
 	type DefinitionKind,
 	type FieldDef,
@@ -7,6 +9,8 @@ import {
 	type FieldType,
 	FIELD_KEY_RE,
 	RESERVED_FIELD_KEY_ID,
+	SCORE_DAY_AGGREGATES,
+	type ScoreDayAggregate,
 } from "./types";
 
 export interface FieldSchemaRowInput {
@@ -37,6 +41,14 @@ export interface DefinitionFormInput {
 	dormantAfterDays?: string;
 	goal?: string;
 	resetCadence?: "yearly" | "monthly" | "never" | "";
+	scaleMin?: string;
+	scaleMax?: string;
+	scaleLabelLow?: string;
+	scaleLabelHigh?: string;
+	higherIsBetter?: boolean;
+	dayAggregate?: ScoreDayAggregate;
+	target?: string;
+	expectedCadence?: string;
 	fieldSchema: FieldSchemaRowInput[];
 }
 
@@ -266,6 +278,66 @@ export function buildDefinitionFromInput(
 			};
 			break;
 		}
+		case "score": {
+			const scaleResult = buildScale(input);
+			if (!scaleResult.ok) return scaleResult;
+			const [lo, hi] = scaleResult.scale;
+
+			const target = parseNumberOrNull(input.target);
+			if (target !== null && (target < lo || target > hi)) {
+				return {
+					ok: false,
+					error: `Target ${target} must fall inside the scale (${lo}–${hi})`,
+					field: "target",
+				};
+			}
+
+			const expectedCadence = (input.expectedCadence ?? "").trim();
+			if (expectedCadence !== "" && !parseTargetCadence(expectedCadence)) {
+				return {
+					ok: false,
+					error:
+						'Expected cadence must look like "1/day" (count followed by /day, /week, or /month)',
+					field: "expectedCadence",
+				};
+			}
+
+			const aggregate = input.dayAggregate;
+			if (
+				aggregate !== undefined &&
+				!SCORE_DAY_AGGREGATES.includes(aggregate)
+			) {
+				const allowed = SCORE_DAY_AGGREGATES.join(", ");
+				return {
+					ok: false,
+					error: `Day aggregate must be one of: ${allowed}`,
+					field: "dayAggregate",
+				};
+			}
+
+			const labelLow = (input.scaleLabelLow ?? "").trim();
+			const labelHigh = (input.scaleLabelHigh ?? "").trim();
+
+			definition = {
+				...base,
+				kind: "score",
+				scale: scaleResult.scale,
+				scaleLabels:
+					labelLow === "" && labelHigh === ""
+						? undefined
+						: [labelLow, labelHigh],
+				// Only persist the non-default, so frontmatter stays quiet for the
+				// common case.
+				higherIsBetter: input.higherIsBetter === false ? false : undefined,
+				dayAggregate:
+					aggregate !== undefined && aggregate !== DEFAULT_SCORE_DAY_AGGREGATE
+						? aggregate
+						: undefined,
+				target: target ?? undefined,
+				expectedCadence: expectedCadence === "" ? undefined : expectedCadence,
+			};
+			break;
+		}
 	}
 
 	const warnings: string[] = [];
@@ -290,6 +362,57 @@ export function buildDefinitionFromInput(
 	}
 
 	return { ok: true, definition, warnings };
+}
+
+interface ScaleOk {
+	ok: true;
+	scale: [number, number];
+}
+
+/**
+ * Both bounds blank means "use the default"; anything else must be a complete,
+ * ordered pair of whole numbers. Non-integer bounds are rejected because the
+ * log slider steps by 1 and the distribution chart buckets per whole value.
+ */
+function buildScale(
+	input: DefinitionFormInput,
+): ScaleOk | BuildDefinitionFailure {
+	const minRaw = (input.scaleMin ?? "").trim();
+	const maxRaw = (input.scaleMax ?? "").trim();
+	if (minRaw === "" && maxRaw === "") {
+		return { ok: true, scale: [...DEFAULT_SCORE_SCALE] };
+	}
+	if (minRaw === "" || maxRaw === "") {
+		return {
+			ok: false,
+			error: "Scale requires both a low and a high bound",
+			field: minRaw === "" ? "scaleMin" : "scaleMax",
+		};
+	}
+	const lo = Number(minRaw);
+	const hi = Number(maxRaw);
+	if (!Number.isInteger(lo)) {
+		return {
+			ok: false,
+			error: "Scale bounds must be whole numbers",
+			field: "scaleMin",
+		};
+	}
+	if (!Number.isInteger(hi)) {
+		return {
+			ok: false,
+			error: "Scale bounds must be whole numbers",
+			field: "scaleMax",
+		};
+	}
+	if (lo >= hi) {
+		return {
+			ok: false,
+			error: `Scale low bound (${lo}) must be less than the high bound (${hi})`,
+			field: "scaleMin",
+		};
+	}
+	return { ok: true, scale: [lo, hi] };
 }
 
 interface FieldSchemaOk {
@@ -431,6 +554,18 @@ export function emptyFormInput(kind: DefinitionKind): DefinitionFormInput {
 			return { ...base, dormantAfterDays: "" };
 		case "counter":
 			return { ...base, unit: "", goal: "", resetCadence: "" };
+		case "score":
+			return {
+				...base,
+				scaleMin: String(DEFAULT_SCORE_SCALE[0]),
+				scaleMax: String(DEFAULT_SCORE_SCALE[1]),
+				scaleLabelLow: "",
+				scaleLabelHigh: "",
+				higherIsBetter: true,
+				dayAggregate: DEFAULT_SCORE_DAY_AGGREGATE,
+				target: "",
+				expectedCadence: "",
+			};
 	}
 }
 
@@ -491,6 +626,18 @@ export function definitionToFormInput(def: Definition): DefinitionFormInput {
 				unit: def.unit ?? "",
 				goal: def.goal !== undefined ? String(def.goal) : "",
 				resetCadence: def.resetCadence ?? "",
+			};
+		case "score":
+			return {
+				...base,
+				scaleMin: String(def.scale[0]),
+				scaleMax: String(def.scale[1]),
+				scaleLabelLow: def.scaleLabels?.[0] ?? "",
+				scaleLabelHigh: def.scaleLabels?.[1] ?? "",
+				higherIsBetter: def.higherIsBetter !== false,
+				dayAggregate: def.dayAggregate ?? DEFAULT_SCORE_DAY_AGGREGATE,
+				target: def.target !== undefined ? String(def.target) : "",
+				expectedCadence: def.expectedCadence ?? "",
 			};
 	}
 }

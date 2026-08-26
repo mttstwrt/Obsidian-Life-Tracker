@@ -2,11 +2,14 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { parseEventLine, serializeEventLine } from "./eventLine";
 import {
 	CURRENT_SCHEMA_VERSION,
+	DEFAULT_SCORE_SCALE,
 	type Definition,
 	type DefinitionKind,
 	type DefinitionStatus,
 	type Event,
 	type FieldDef,
+	SCORE_DAY_AGGREGATES,
+	type ScoreDayAggregate,
 } from "./types";
 
 /**
@@ -45,6 +48,7 @@ const VALID_KINDS = new Set<DefinitionKind>([
 	"reverse-habit",
 	"project",
 	"counter",
+	"score",
 ]);
 const VALID_STATUSES = new Set<DefinitionStatus>([
 	"active",
@@ -259,7 +263,62 @@ function buildDefinition(
 				},
 			};
 		}
+		case "score": {
+			const aggregate = stringField(raw, "dayAggregate");
+			return {
+				ok: true,
+				definition: {
+					...base,
+					kind: "score",
+					scale: parseScale(raw.scale),
+					scaleLabels: parseScaleLabels(raw.scaleLabels),
+					higherIsBetter:
+						typeof raw.higherIsBetter === "boolean"
+							? raw.higherIsBetter
+							: undefined,
+					// Lenient on purpose: an unrecognized aggregate is dropped
+					// (leaving consumers to apply DEFAULT_SCORE_DAY_AGGREGATE)
+					// rather than failing the whole file.
+					dayAggregate: SCORE_DAY_AGGREGATES.includes(
+						aggregate as ScoreDayAggregate,
+					)
+						? (aggregate as ScoreDayAggregate)
+						: undefined,
+					target: numberField(raw, "target"),
+					expectedCadence: stringField(raw, "expectedCadence"),
+				},
+			};
+		}
 	}
+}
+
+/**
+ * A scale that is missing, malformed, or inverted falls back to the default
+ * rather than failing the parse — a bad bound would otherwise make the whole
+ * definition (and its event history) disappear from the vault.
+ *
+ * Whole-number bounds are *not* enforced here, unlike in the definition form:
+ * a hand-edited `scale: [1, 7.5]` is unusual but readable, and rounding it
+ * would silently rewrite what the user typed.
+ */
+function parseScale(raw: unknown): [number, number] {
+	if (!Array.isArray(raw) || raw.length !== 2) return [...DEFAULT_SCORE_SCALE];
+	const [lo, hi] = raw;
+	if (typeof lo !== "number" || typeof hi !== "number") {
+		return [...DEFAULT_SCORE_SCALE];
+	}
+	if (!Number.isFinite(lo) || !Number.isFinite(hi) || lo >= hi) {
+		return [...DEFAULT_SCORE_SCALE];
+	}
+	return [lo, hi];
+}
+
+function parseScaleLabels(raw: unknown): [string, string] | undefined {
+	if (!Array.isArray(raw) || raw.length !== 2) return undefined;
+	const [lo, hi] = raw;
+	if (typeof lo !== "string" || typeof hi !== "string") return undefined;
+	if (lo.trim() === "" && hi.trim() === "") return undefined;
+	return [lo, hi];
 }
 
 function stringField(
@@ -366,6 +425,17 @@ function definitionToYamlObject(def: Definition): Record<string, unknown> {
 			if (def.goal !== undefined) out.goal = def.goal;
 			if (def.resetCadence !== undefined)
 				out.resetCadence = def.resetCadence;
+			break;
+		case "score":
+			out.scale = def.scale;
+			if (def.scaleLabels !== undefined) out.scaleLabels = def.scaleLabels;
+			if (def.higherIsBetter !== undefined)
+				out.higherIsBetter = def.higherIsBetter;
+			if (def.dayAggregate !== undefined)
+				out.dayAggregate = def.dayAggregate;
+			if (def.target !== undefined) out.target = def.target;
+			if (def.expectedCadence !== undefined)
+				out.expectedCadence = def.expectedCadence;
 			break;
 	}
 

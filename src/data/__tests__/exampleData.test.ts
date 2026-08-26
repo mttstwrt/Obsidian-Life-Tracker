@@ -31,6 +31,7 @@ describe("seeded example data", () => {
 			"maintenance",
 			"project",
 			"reverse-habit",
+			"score",
 		]);
 	});
 

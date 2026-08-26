@@ -135,18 +135,26 @@ export interface ScoreSummary {
 
 Ordered by phase. Each phase ends green on `bun test` and `bun run check`.
 
-### S0 — Data model (no UI)
+### S0 — Data model (no UI) — **done**
 
 | File | Change |
 | --- | --- |
-| `src/data/types.ts` | `ScoreDefinition`; `"score"` in `DefinitionKind` and the `Definition` union |
-| `src/data/definitionFile.ts` | `VALID_KINDS` (`:42`); `buildDefinition` case (`:244` neighborhood); `definitionToYamlObject` case (`:364`) |
-| `src/data/definitionForm.ts` | `DefinitionFormInput` fields; `buildDefinitionFromInput` case + validation; `emptyFormInput`; `definitionToFormInput` |
-| `test-vault/LifeTracker/definitions/sleep.md` | New fixture with ~30 days of ratings |
-| `src/data/__tests__/exampleData.test.ts` | Add `"score"` to the expected kinds list (`:29`) |
-| `src/data/__tests__/definitionForm.test.ts` | Round-trip + validation cases: scale ordering, non-integer bounds, `target` outside scale, bad `dayAggregate` |
+| `src/data/types.ts` | `ScoreDefinition`; `"score"` in `DefinitionKind` and the `Definition` union; `SCORE_DAY_AGGREGATES`, `DEFAULT_SCORE_SCALE`, `DEFAULT_SCORE_DAY_AGGREGATE` |
+| `src/data/definitionFile.ts` | `VALID_KINDS`; `buildDefinition` case with lenient `parseScale` / `parseScaleLabels`; `definitionToYamlObject` case |
+| `src/data/definitionForm.ts` | `DefinitionFormInput` fields; `buildDefinitionFromInput` case; `buildScale` validation; `emptyFormInput`; `definitionToFormInput` |
+| `test-vault/LifeTracker/definitions/sleep.md` | 30 days of daily ratings, 1–10, with a `target` and two custom fields |
+| `test-vault/LifeTracker/definitions/stress.md` | The awkward case: 1–5 scale, `higherIsBetter: false`, `dayAggregate: max`, several ratings per day |
+| `src/data/__tests__/definitionFile.test.ts` | New file — score frontmatter parsing, every lenient fallback, and the unknown-kind rejection behind §2.2 |
+| `src/data/__tests__/definitionForm.test.ts` | Validation and round-trip cases |
+| `src/data/__tests__/exampleData.test.ts` | `"score"` in the expected kinds list |
 
-Validation to cover: `scale` must be two integers with `min < max`; `target`, when set, must fall inside `scale`; `expectedCadence`, when set, must satisfy `parseTargetCadence` (already exported from `definitionForm.ts`); unknown `dayAggregate` falls back to `mean` rather than failing the parse — parsers stay lenient, the form stays strict.
+Validation covered: `scale` must be two whole numbers with `min < max` (both blank means the default); `target`, when set, must fall inside `scale`; `expectedCadence`, when set, must satisfy `parseTargetCadence`.
+
+**Lenient/strict split.** The form rejects a bad scale; the *parser* degrades to `[1, 10]` instead, because a hand-edited bound must never make a definition and its whole event history vanish from the vault. Same for an unrecognized `dayAggregate` (dropped, so consumers apply the default) and malformed `scaleLabels`. Whole-number bounds are enforced only in the form.
+
+**Defaults stay out of frontmatter.** `higherIsBetter: true` and `dayAggregate: "mean"` are stored as `undefined` rather than written out, so a plain score file has three lines of score config rather than seven. Both round-trip stably (tested).
+
+Two files listed under S1/S3 moved into S0 because they are *compile-forced* by the union — leaving them out would not build: `TAG_BY_KIND` in `dailyNote.ts` (an exhaustive `Record`) and the `create_definition` switch in `api.ts`. Since the API case had to exist, `"score"` also went into `KINDS` and the `create_definition` descriptor gained `scale_min` / `scale_max` / `higher_is_better` / `target` — otherwise the handler would have been unreachable dead code. The rest of S3's API work (`list_definitions` output, `get_summaries`) still waits on `summarizeScore`.
 
 ### S1 — Capture
 
@@ -155,8 +163,9 @@ Validation to cover: `scale` must be two integers with `min < max`; `target`, wh
 | `src/components/DefinitionForm.svelte` | Kind option + score field group (scale min/max, labels, higherIsBetter, dayAggregate, target, expectedCadence) |
 | `src/components/LogEventForm.svelte` | Slider for `value` when `kind === "score"`, endpoint captions, large current-value readout. Reuses the existing `.lt-form__range` styles (`:626`) |
 | `src/data/logForm.ts` | `valueExpected` → `"score"`; `buildLogEvent` requires a value in range for score events |
-| `src/data/dailyNote.ts` | `TAG_BY_KIND` entry (exhaustive `Record`, so `check` will demand it) |
 | `src/data/planSync.ts` | `valueForAutoLog` case — see §4.3 |
+
+(`TAG_BY_KIND` in `dailyNote.ts` landed in S0 — the exhaustive `Record` would not compile without it.)
 
 ### S2 — Display
 
@@ -178,7 +187,7 @@ Tab card contents, per score: current value (large), 7d and 30d means with a tre
 
 | File | Change |
 | --- | --- |
-| `src/api.ts` | `KINDS` (`:44`); `create_definition` case (`:464`) + descriptor params; `list_definitions` output (`:258`); `get_summaries` |
+| `src/api.ts` | `list_definitions` output (score fields), `get_summaries` (needs `summarizeScore`), and the `list_definitions` description string. `KINDS`, the `create_definition` case, and its descriptor params landed in S0 |
 | `src/components/CodeBlockView.svelte` | `view: score` for embedding a score sparkline in a note |
 | `docs/integration.md` | Score section in the file contract, incl. §2.2 |
 | `README.md` | "What you can track" table row |
@@ -216,8 +225,8 @@ Also unresolved and deferred: whether `formatPlanLine` should emit score lines a
 
 **S0 → S1 → S2 → S3.** S0 and S1 alone are a usable feature — scores can be defined, logged, and read from markdown — and S2 is where they become worth looking at. Nothing outside `docs/` and `README.md` in S3 blocks daily use.
 
-## 6. Open questions
+## 6. Resolved questions
 
-1. **Default scale — 1–10 or 1–5?** 1–10 as asked, but 1–5 has better recall consistency (most people cannot reliably distinguish a 6 from a 7). Defaulting to 1–10 and making the field prominent in the form is the safe call.
-2. **Should `target` drive a notification or just a reference line?** Reference line for now; anything louder is a settings question.
-3. **Retroactive rating.** `buildLogEvent` already stamps `entered_at` on retroactive logs. Rating yesterday's sleep this morning is the *normal* case for scores, not the exception — consider suppressing that stamp for score kinds, or the field will be on nearly every event.
+1. **Default scale — 1–10**, adjustable per definition via a prominent field in the definition form.
+2. **`target` has no default.** It stays absent unless the user sets one, and when set it draws a reference line on the sparkline — nothing louder.
+3. **Keep the `entered_at` stamp on retroactive score logs.** Rating last night's sleep this morning will put the field on most score events; that is accepted, since it keeps one rule for every kind and preserves "when was this actually entered" for later analysis.

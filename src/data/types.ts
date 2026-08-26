@@ -47,7 +47,8 @@ export type DefinitionKind =
 	| "maintenance"
 	| "reverse-habit"
 	| "project"
-	| "counter";
+	| "counter"
+	| "score";
 
 export type DefinitionStatus = "active" | "dormant" | "archived";
 
@@ -95,12 +96,54 @@ export interface CounterDefinition extends BaseDefinition {
 	resetCadence?: "yearly" | "monthly" | "never";
 }
 
+/** How several ratings logged on the same day fold into that day's value. */
+export type ScoreDayAggregate = "mean" | "last" | "max" | "min";
+
+export const SCORE_DAY_AGGREGATES: ScoreDayAggregate[] = [
+	"mean",
+	"last",
+	"max",
+	"min",
+];
+
+export const DEFAULT_SCORE_SCALE: [number, number] = [1, 10];
+export const DEFAULT_SCORE_DAY_AGGREGATE: ScoreDayAggregate = "mean";
+
+/**
+ * A rating rather than an occurrence — "how did I sleep", "how was work".
+ *
+ * The rating itself lives in `Event.value`, so score events use the same line
+ * format as every other kind and need no parser changes. A score event without
+ * a value is meaningless, so unlike other kinds the value is *required* at
+ * write time (see `buildLogEvent`).
+ *
+ * Note the asymmetry with `fieldSchema`: a rating that qualifies an event you
+ * are already logging ("how good was that workout") belongs on that definition
+ * as a `number` field with a `range`, not here. This kind is for ratings that
+ * *are* the event.
+ */
+export interface ScoreDefinition extends BaseDefinition {
+	kind: "score";
+	/** Inclusive integer bounds, low end first. */
+	scale: [number, number];
+	/** Endpoint captions for the slider, e.g. ["awful", "great"]. */
+	scaleLabels?: [string, string];
+	/** False for stress / pain / urge, where a low rating is the good one. */
+	higherIsBetter?: boolean;
+	dayAggregate?: ScoreDayAggregate;
+	/** Optional level to stay above (or below, when `higherIsBetter` is false). */
+	target?: number;
+	/** How often a rating is expected, e.g. "1/day". Drives coverage and freshness only — scores have no streaks. */
+	expectedCadence?: string;
+}
+
 export type Definition =
 	| HabitDefinition
 	| MaintenanceDefinition
 	| ReverseHabitDefinition
 	| ProjectDefinition
-	| CounterDefinition;
+	| CounterDefinition
+	| ScoreDefinition;
 
 export const CURRENT_SCHEMA_VERSION = 1;
 

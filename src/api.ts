@@ -5,7 +5,11 @@ import type {
 	Event,
 	FieldValue,
 } from "./data/types";
-import { CURRENT_SCHEMA_VERSION, FIELD_KEY_RE } from "./data/types";
+import {
+	CURRENT_SCHEMA_VERSION,
+	DEFAULT_SCORE_SCALE,
+	FIELD_KEY_RE,
+} from "./data/types";
 import type LifeTrackerPlugin from "./main";
 
 /**
@@ -47,6 +51,7 @@ const KINDS: DefinitionKind[] = [
 	"reverse-habit",
 	"project",
 	"counter",
+	"score",
 ];
 
 const DESCRIPTORS: ToolDescriptor[] = [
@@ -166,7 +171,7 @@ const DESCRIPTORS: ToolDescriptor[] = [
 	{
 		name: "create_definition",
 		description:
-			"Create a new thing to track. Kinds: habit (needs target_cadence like '4/week' or 'daily'), maintenance (needs interval_days), reverse-habit, project, counter. Ask the user before inventing definitions they didn't request.",
+			"Create a new thing to track. Kinds: habit (needs target_cadence like '4/week' or 'daily'), maintenance (needs interval_days), reverse-habit, project, counter, score (a 1-10 style rating such as sleep quality or energy). Use score only when the rating IS the event; a rating that qualifies something already tracked belongs in that definition's field schema instead. Ask the user before inventing definitions they didn't request.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -192,6 +197,24 @@ const DESCRIPTORS: ToolDescriptor[] = [
 				},
 				unit: { type: "string", description: "Habit/counter unit label." },
 				goal: { type: "number", description: "Counter goal." },
+				scale_min: {
+					type: "number",
+					description: "Score: low end of the rating scale. Default 1.",
+				},
+				scale_max: {
+					type: "number",
+					description: "Score: high end of the rating scale. Default 10.",
+				},
+				higher_is_better: {
+					type: "boolean",
+					description:
+						"Score: set false when a low rating is the good one (stress, pain). Default true.",
+				},
+				target: {
+					type: "number",
+					description:
+						"Score: optional level to stay above. Omit unless the user asked for one.",
+				},
 			},
 			required: ["id", "name", "kind"],
 		},
@@ -469,6 +492,28 @@ export function createApi(plugin: LifeTrackerPlugin): LifeTrackerApi {
 						goal: typeof args.goal === "number" ? args.goal : undefined,
 					};
 					break;
+				case "score": {
+					const lo = Number(args.scale_min ?? DEFAULT_SCORE_SCALE[0]);
+					const hi = Number(args.scale_max ?? DEFAULT_SCORE_SCALE[1]);
+					if (!Number.isInteger(lo) || !Number.isInteger(hi) || lo >= hi) {
+						return err(
+							"score scale_min/scale_max must be whole numbers with scale_min < scale_max",
+						);
+					}
+					const target =
+						typeof args.target === "number" ? args.target : undefined;
+					if (target !== undefined && (target < lo || target > hi)) {
+						return err(`score target must fall inside the scale (${lo}-${hi})`);
+					}
+					def = {
+						...base,
+						kind,
+						scale: [lo, hi],
+						higherIsBetter: args.higher_is_better === false ? false : undefined,
+						target,
+					};
+					break;
+				}
 			}
 
 			await plugin.data.createDefinition(def);
