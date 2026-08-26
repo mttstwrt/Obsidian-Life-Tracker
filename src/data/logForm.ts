@@ -31,7 +31,12 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}$/;
 const NUMBER_RE = /^-?\d+(\.\d+)?$/;
 
-export function valueExpected(def: Definition): "boolean" | "number" | "none" {
+export function valueExpected(
+	def: Definition,
+): "boolean" | "number" | "score" | "none" {
+	// A score's rating is the point of the event, so it gets its own widget and
+	// is the one value the form refuses to leave empty.
+	if (def.kind === "score") return "score";
 	if (def.kind === "habit") {
 		return def.valueType === "boolean" ? "boolean" : "number";
 	}
@@ -70,6 +75,24 @@ export function buildLogEvent(
 	const expected = valueExpected(def);
 	if (expected === "boolean") {
 		value = 1;
+	} else if (def.kind === "score") {
+		// Checked against def.kind rather than `expected` so the scale narrows.
+		const trimmed = input.valueRaw.trim();
+		if (trimmed === "") {
+			return { ok: false, error: "A rating is required" };
+		}
+		if (!NUMBER_RE.test(trimmed)) {
+			return { ok: false, error: `Rating "${trimmed}" is not a number` };
+		}
+		const [lo, hi] = def.scale;
+		const rating = Number(trimmed);
+		if (rating < lo || rating > hi) {
+			return {
+				ok: false,
+				error: `Rating must be between ${lo} and ${hi}`,
+			};
+		}
+		value = rating;
 	} else if (expected === "number") {
 		const trimmed = input.valueRaw.trim();
 		if (trimmed !== "") {

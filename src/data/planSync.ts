@@ -92,8 +92,30 @@ export function buildAutoEventSource(
 }
 
 /**
- * Returns null if the planned timestamp can't be computed or the definition has
- * required fields (which we can't safely fill from a checkbox alone).
+ * Why a ticked checkbox can't produce an event for this definition, or null
+ * when it can.
+ *
+ * A checkbox conveys "it happened" and nothing else, so anything needing a
+ * value only the user can supply has to go through the log modal instead. The
+ * caller surfaces the reason rather than logging a blank event — silent data
+ * loss is the failure mode to design against.
+ */
+export function autoLogBlockedReason(def: Definition): string | null {
+	if (def.kind === "score") {
+		return "a rating can't come from a checkbox, open the log modal";
+	}
+	const required = (def.fieldSchema ?? []).filter(
+		(f) => f.required && !f.retired,
+	);
+	if (required.length > 0) {
+		return "required fields, open the log modal";
+	}
+	return null;
+}
+
+/**
+ * Returns null if the planned timestamp can't be computed or the definition
+ * can't be auto-logged at all (see `autoLogBlockedReason`).
  */
 export function buildAutoEvent(
 	def: Definition,
@@ -102,10 +124,7 @@ export function buildAutoEvent(
 ): AutoEvent | null {
 	const timestamp = buildPlannedTimestamp(date, line.startTime);
 	if (!timestamp) return null;
-	const required = (def.fieldSchema ?? []).filter(
-		(f) => f.required && !f.retired,
-	);
-	if (required.length > 0) return null;
+	if (autoLogBlockedReason(def) !== null) return null;
 	return {
 		timestamp,
 		value: computeAutoValue(def, line),

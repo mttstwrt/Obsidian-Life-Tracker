@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { CheckedPlanLine } from "../dailyNote";
 import {
+	autoLogBlockedReason,
 	buildAutoEvent,
 	buildPlannedTimestamp,
 	computeAutoValue,
@@ -171,5 +172,65 @@ describe("buildAutoEvent", () => {
 
 	test("returns null on invalid date", () => {
 		expect(buildAutoEvent(habit(), checked("07:00"), "garbage")).toBeNull();
+	});
+});
+
+function score(
+	overrides: Partial<Extract<Definition, { kind: "score" }>> = {},
+): Definition {
+	return {
+		id: "sleep",
+		displayName: "Sleep quality",
+		kind: "score",
+		scale: [1, 10],
+		status: "active",
+		tags: [],
+		created: "2026-05-01",
+		schemaVersion: 1,
+		...overrides,
+	} as Definition;
+}
+
+describe("autoLogBlockedReason", () => {
+	test("an ordinary definition is not blocked", () => {
+		expect(autoLogBlockedReason(habit())).toBeNull();
+		expect(autoLogBlockedReason(maintenance())).toBeNull();
+	});
+
+	// A checkbox says "it happened" and nothing more, so it cannot supply a
+	// rating. Logging a blank score would be worse than skipping.
+	test("a score is blocked, and says why", () => {
+		const reason = autoLogBlockedReason(score());
+		expect(reason).toContain("rating");
+		expect(reason).toContain("log modal");
+	});
+
+	test("required fields block, retired ones do not", () => {
+		expect(
+			autoLogBlockedReason(
+				habit({ fieldSchema: [{ key: "route", type: "string", required: true }] }),
+			),
+		).toContain("required fields");
+		expect(
+			autoLogBlockedReason(
+				habit({
+					fieldSchema: [
+						{ key: "route", type: "string", required: true, retired: true },
+					],
+				}),
+			),
+		).toBeNull();
+	});
+});
+
+describe("buildAutoEvent — score", () => {
+	test("refuses to build an event for a score", () => {
+		expect(buildAutoEvent(score(), checked("07:00"), "2026-05-02")).toBeNull();
+	});
+
+	test("still builds one for a comparable non-score definition", () => {
+		expect(
+			buildAutoEvent(habit(), checked("07:00"), "2026-05-02"),
+		).not.toBeNull();
 	});
 });

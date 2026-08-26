@@ -78,6 +78,12 @@
 			emoji: "🔢",
 			desc: "Accumulate, optionally toward a goal",
 		},
+		{
+			kind: "score",
+			label: "Score",
+			emoji: "📈",
+			desc: "Rate how it went, 1-10",
+		},
 	];
 
 	const fieldTypes: FieldType[] = [
@@ -376,6 +382,85 @@
 					</select>
 				</label>
 			</fieldset>
+		{:else if form.kind === "score"}
+			<fieldset class="lt-defform__section">
+				<legend>Score</legend>
+				<div class="lt-defform__row">
+					<label class="lt-defform__label">
+						<span>Scale low</span>
+						<input
+							type="text"
+							inputmode="numeric"
+							bind:value={form.scaleMin}
+							placeholder="1"
+						/>
+					</label>
+					<label class="lt-defform__label">
+						<span>Scale high</span>
+						<input
+							type="text"
+							inputmode="numeric"
+							bind:value={form.scaleMax}
+							placeholder="10"
+						/>
+					</label>
+				</div>
+				<div class="lt-defform__row">
+					<label class="lt-defform__label">
+						<span>Label for the low end</span>
+						<input
+							type="text"
+							bind:value={form.scaleLabelLow}
+							placeholder="optional — e.g. awful"
+						/>
+					</label>
+					<label class="lt-defform__label">
+						<span>Label for the high end</span>
+						<input
+							type="text"
+							bind:value={form.scaleLabelHigh}
+							placeholder="optional — e.g. great"
+						/>
+					</label>
+				</div>
+				<label class="lt-defform__check lt-defform__check--stacked">
+					<input type="checkbox" bind:checked={form.higherIsBetter} />
+					<span>
+						A high rating is the good one
+						<small class="lt-defform__hint">
+							Uncheck for things like stress or pain, where low is good.
+						</small>
+					</span>
+				</label>
+				<label class="lt-defform__label">
+					<span>
+						If rated more than once a day, the day counts as
+					</span>
+					<select bind:value={form.dayAggregate}>
+						<option value="mean">the average</option>
+						<option value="last">the last rating</option>
+						<option value="max">the highest rating</option>
+						<option value="min">the lowest rating</option>
+					</select>
+				</label>
+				<label class="lt-defform__label">
+					<span>Target</span>
+					<input
+						type="text"
+						inputmode="decimal"
+						bind:value={form.target}
+						placeholder="optional — a level to stay above"
+					/>
+				</label>
+				<label class="lt-defform__label">
+					<span>Expected cadence</span>
+					<input
+						type="text"
+						bind:value={form.expectedCadence}
+						placeholder="optional — e.g. 1/day"
+					/>
+				</label>
+			</fieldset>
 		{/if}
 
 		<fieldset class="lt-defform__section">
@@ -586,6 +671,25 @@
 		align-items: center;
 		gap: 0.4rem;
 		font-size: 0.85rem;
+	}
+	/* Top-align instead, for a checkbox whose label carries a wrapping hint. */
+	.lt-defform__check--stacked {
+		align-items: flex-start;
+	}
+	.lt-defform__check--stacked input {
+		margin-top: 0.15rem;
+	}
+	.lt-defform__check--stacked .lt-defform__hint {
+		display: block;
+		font-size: 0.75rem;
+	}
+	.lt-defform__row {
+		display: flex;
+		gap: 0.5rem;
+	}
+	.lt-defform__row > .lt-defform__label {
+		flex: 1;
+		min-width: 0;
 	}
 	.lt-defform__req {
 		color: var(--text-error);

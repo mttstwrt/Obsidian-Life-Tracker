@@ -156,16 +156,22 @@ Validation covered: `scale` must be two whole numbers with `min < max` (both bla
 
 Two files listed under S1/S3 moved into S0 because they are *compile-forced* by the union — leaving them out would not build: `TAG_BY_KIND` in `dailyNote.ts` (an exhaustive `Record`) and the `create_definition` switch in `api.ts`. Since the API case had to exist, `"score"` also went into `KINDS` and the `create_definition` descriptor gained `scale_min` / `scale_max` / `higher_is_better` / `target` — otherwise the handler would have been unreachable dead code. The rest of S3's API work (`list_definitions` output, `get_summaries`) still waits on `summarizeScore`.
 
-### S1 — Capture
+### S1 — Capture — **done**
 
 | File | Change |
 | --- | --- |
-| `src/components/DefinitionForm.svelte` | Kind option + score field group (scale min/max, labels, higherIsBetter, dayAggregate, target, expectedCadence) |
-| `src/components/LogEventForm.svelte` | Slider for `value` when `kind === "score"`, endpoint captions, large current-value readout. Reuses the existing `.lt-form__range` styles (`:626`) |
-| `src/data/logForm.ts` | `valueExpected` → `"score"`; `buildLogEvent` requires a value in range for score events |
-| `src/data/planSync.ts` | `valueForAutoLog` case — see §4.3 |
+| `src/components/DefinitionForm.svelte` | Kind option + score field group (scale bounds, endpoint labels, higherIsBetter, dayAggregate, target, expectedCadence) |
+| `src/components/LogEventForm.svelte` | The rating widget — see below |
+| `src/data/logForm.ts` | `valueExpected` → `"score"`; `buildLogEvent` requires a value inside `scale` |
+| `src/data/planSync.ts` | `autoLogBlockedReason` + the `buildAutoEvent` guard — see §4.3 |
+| `src/main.ts` | Surfaces the block reason, and a Notice for scores |
+| `src/data/__tests__/logForm.test.ts`, `planSync.test.ts` | Required-value, scale bounds, and auto-log-block cases |
 
 (`TAG_BY_KIND` in `dailyNote.ts` landed in S0 — the exhaustive `Record` would not compile without it.)
+
+**Buttons, not a slider.** The plan said slider; buttons shipped. A range input reports its midpoint before it is touched, so an untouched slider submits a rating the user never chose — fatal for the one field whose whole value is that the number is deliberate. Discrete buttons have no default state, and are one tap on mobile. Scales too wide to show as buttons (more than 11 steps) fall back to a number input with `min`/`max`; nothing defaults to a value there either.
+
+**Out-of-range ratings are rejected, not warned.** Unlike `coerceField`'s `rangeWarning` for custom fields, `buildLogEvent` refuses a rating outside `scale`. Forms are strict. The one cost: narrowing a definition's scale later makes old out-of-range events un-editable until the scale widens again or the rating changes. Judged acceptable — nothing is lost, the file keeps the original value, and the error names the range.
 
 ### S2 — Display
 
@@ -219,7 +225,9 @@ Ticking a checkbox conveys "it happened"; it cannot convey "it was a 7". Since a
 
 Rejected: popping the log modal from the sync path. That path is file-watch-driven, so another device's sync would open a modal on this one.
 
-Also unresolved and deferred: whether `formatPlanLine` should emit score lines at all. Planning "rate my sleep at 07:00" is reasonable as a reminder; it just cannot round-trip into an event. Ship S1 without score plan lines and revisit if it's actually wanted.
+**Skipping is silent no longer.** Ticking a box is a deliberate act, so a skipped score also raises a Notice naming the definition, rather than only a `console.info`. `autoLogBlockedReason` carries the reason so the message is accurate, which also fixed a pre-existing bug: every `buildAutoEvent` failure previously reported "required fields", including timestamps that simply failed to parse.
+
+**Score plan lines are kept** — a reversal of this section's earlier "ship S1 without them". Planning "07:00 Sleep quality" is a useful reminder, and the direction that matters already works: logging the rating through the modal ticks the matching checkbox via `syncEventToDailyNote`, which is kind-agnostic and pre-registers the plan key so the watcher does not re-process its own tick. Only the checkbox → event direction is blocked, and now it says so.
 
 ## 5. Order of work
 
