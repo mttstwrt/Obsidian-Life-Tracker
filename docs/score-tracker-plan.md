@@ -196,16 +196,29 @@ Two files listed under S1/S3 moved into S0 because they are *compile-forced* by 
 
 **Sparkline gaps are labelled, not interpolated.** `Sparkline` takes a plain `number[]` with no gap support, so the tab plots only rated days and labels the axis "last N rated days" — accurate, rather than drawing an unbroken daily line over days that were never rated. A `target` reference line would need a new `Sparkline` prop; the target shows as a stat instead.
 
-### S3 — Integration & analytics
+### S3 — Integration — **done**
 
 | File | Change |
 | --- | --- |
-| `src/api.ts` | `list_definitions` output (score fields), `get_summaries` (needs `summarizeScore`), and the `list_definitions` description string. `KINDS`, the `create_definition` case, and its descriptor params landed in S0 |
-| `src/components/CodeBlockView.svelte` | `view: score` for embedding a score sparkline in a note |
-| `docs/integration.md` | Score section in the file contract, incl. §2.2 |
-| `README.md` | "What you can track" table row |
+| `src/api.ts` | Score fields in `list_definitions`; a `scores` block in `get_summaries`; **the write guard below**; updated tool descriptions |
+| `src/components/CodeBlockView.svelte` | `view: score` |
+| `src/data/__tests__/api.test.ts` | New file — the write guard and the score read shapes |
+| `docs/integration.md` | Score section in the file contract, the forward-compat note from §2.2, and the write rule |
+| `README.md`, `public/manifest.json` | Score row and description |
 
-Stretch, and the reason scores are worth building at all: **cross-definition correlation.** `fieldCorrelations` (`visualizations.ts:192`) already does Pearson across numeric fields *within* one definition. Generalizing it to align daily score series against each other, and against habit occurrence, answers "do I sleep better on days I run?" and "does bad sleep predict a bad day at work?". Keep it out of S0–S2; it needs its own design pass on lag, alignment, and how honestly to present *n* and *r* to a user who will read correlation as cause.
+**The write guard was a live corruption path, not a nicety.** `log_event` treated an absent `value` as `1` — correct for every other kind ("it happened once"), but on a score `1` is not "unspecified", it is the worst possible rating. An agent logging sleep without asking for a number would have quietly recorded the worst night on record. `log_event` now rejects a score without an explicit in-range rating, `edit_event` range-checks a patched one, and the tool description tells the model to ask rather than guess.
+
+**Derived statistics are rounded to two decimals** in the API output. A `mean_7d` of `7.428571428571429` invites a language model to quote every digit as if it carried meaning, well past the precision of a 1-10 rating.
+
+**`get_summaries` reports nulls, never omissions**, so a consumer can distinguish "not rated recently" from "this key does not exist". A thin history reports `trend_7d_vs_30d: null` rather than a flat zero.
+
+**`view: score` requires exactly one score definition.** The other code-block views merge events across definitions; averaging ratings from a 1-5 and a 1-10 scale would be meaningless, so it errors instead.
+
+### Still open — cross-definition correlation
+
+The reason scores are worth building at all, and deliberately not built yet. `fieldCorrelations` (`visualizations.ts`) already does Pearson across numeric fields *within* one definition. Generalizing it to align daily score series against each other, and against habit occurrence, answers "do I sleep better on days I run?" and "does bad sleep predict a bad day at work?".
+
+It needs its own design pass before any code: how to align series with gaps, whether to support lag (does today's run show up in tonight's sleep or tomorrow's?), a minimum *n* below which nothing is shown, and how to present *r* to a user who will read correlation as cause. Doing it badly is worse than not doing it — a spurious "your sleep causes your workouts" is a confident lie built from twelve data points.
 
 ### 4.1 Sizing
 
@@ -238,7 +251,7 @@ Rejected: popping the log modal from the sync path. That path is file-watch-driv
 
 ## 5. Order of work
 
-**S0 → S1 → S2 → S3.** S0 and S1 alone are a usable feature — scores can be defined, logged, and read from markdown — and S2 is where they become worth looking at. Nothing outside `docs/` and `README.md` in S3 blocks daily use.
+**S0 → S1 → S2 → S3 — all four shipped.** Scores can be defined, logged, read from markdown, seen on the dashboard and Overview grid, embedded in a note, and driven by an agent. The only item left from this plan is cross-definition correlation, which needs its own design pass (see S3).
 
 ## 6. Resolved questions
 

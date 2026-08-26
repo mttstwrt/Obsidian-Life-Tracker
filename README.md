@@ -1,6 +1,6 @@
 # Life Tracker
 
-A unified habit, maintenance, reverse-habit, project, and counter tracker for [Obsidian](https://obsidian.md). One plugin for the things a habit tracker can't quite express — recurring chores, streaks you want to *grow* instead of break, long-running projects, open-ended counters — built on a single event-stream model so every kind shares the same logging, history, and analytics.
+A unified habit, maintenance, reverse-habit, project, counter, and score tracker for [Obsidian](https://obsidian.md). One plugin for the things a habit tracker can't quite express — recurring chores, streaks you want to *grow* instead of break, long-running projects, open-ended counters, daily ratings — built on a single event-stream model so every kind shares the same logging, history, and analytics.
 
 All data lives in plain markdown inside your vault. No database, no sidecar files, nothing proprietary — just one file per thing you track.
 
@@ -13,12 +13,13 @@ All data lives in plain markdown inside your vault. No database, no sidecar file
 | **Reverse habit** | Gaps you want to grow | Days without doomscrolling, days since a setback |
 | **Project** | Effort over time, no fixed cadence | Writing a book, learning a language |
 | **Counter** | Things you accumulate, optionally toward a goal | Books read this year, push-ups total |
+| **Score** | How well something went, on a scale you choose | Sleep quality, energy, how work was |
 
 Every entry is an *event* — a thing that happened at a moment in time, optionally with a value, a note, and any custom fields you've defined (e.g. mood, route, pages read). The same event stream powers every view.
 
 ## Features
 
-- **Dashboard view** with tabs for Overview, Habits, Maintenance, Projects, Counters, and Analytics. The Overview tab is a unified day grid over everything you track — as much history as fits your screen — with a toggle between per-definition rows and tag-aggregated rows; click any cell to log or plan for that date.
+- **Dashboard view** with tabs for Overview, Habits, Maintenance, Projects, Counters, Scores, and Analytics. The Overview tab is a unified day grid over everything you track — as much history as fits your screen — with a toggle between per-definition rows and tag-aggregated rows; click any cell to log or plan for that date.
 - **Sidebar panel** for at-a-glance status without leaving your current note.
 - **Daily-note sync** — tick a checkbox under your timeline heading and the matching event is logged automatically; un-tick it to remove the event. Compatible with the Tasks plugin's metadata.
 - **Quick-log commands** for any definition, bindable to your own hotkeys.
@@ -29,7 +30,7 @@ Every entry is an *event* — a thing that happened at a moment in time, optiona
 
   ````markdown
   ```lifetracker
-  view: heatmap        # heatmap | sparkline | streak | events
+  view: heatmap        # heatmap | sparkline | streak | events | score
   definition: running  # or definitions: [...] / tags: [exercise]
   days: 90             # optional
   ```
@@ -125,6 +126,8 @@ const summaries = await lt.api.invoke("get_summaries", {});
 The API exposes **MCP-shaped tool descriptors** (`name` / `description` / `inputSchema`), so they map 1:1 onto MCP or OpenAI tool schemas — hand them straight to a language model. `invoke` never throws and always resolves to a JSON string; failures come back as `{"error": "..."}`, a shape designed for a language-model consumer.
 
 v1 tools: `list_definitions`, `query_events`, `get_summaries`, `log_event`, `edit_event`, `delete_event`, `plan_item`, `create_definition`.
+
+Note for score definitions: `log_event` requires an explicit `value` inside the definition's scale. An absent value defaults to `1` for other kinds, which on a score would silently record the worst possible rating, so the API rejects it instead.
 
 Prefer the API for writes (`log_event` runs the same path as the UI — dedup, coercion, daily-note mirror) and for computed status (`get_summaries`); use the file contract for decoupled reads. See [`docs/integration.md`](docs/integration.md) for the full contract, a read-only consumer reference implementation, and versioning guarantees.
 
