@@ -81,6 +81,10 @@
 		if (def.kind === "counter") {
 			return def.unit ? `${ev.value} ${def.unit}` : `${ev.value}`;
 		}
+		if (def.kind === "score") {
+			// The scale matters: a bare "3" reads very differently on 1-5 than 1-10.
+			return `${ev.value}/${def.scale[1]}`;
+		}
 		if (def.kind === "project") {
 			return `${ev.value}`;
 		}

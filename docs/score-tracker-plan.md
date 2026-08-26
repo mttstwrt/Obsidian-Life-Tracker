@@ -173,21 +173,28 @@ Two files listed under S1/S3 moved into S0 because they are *compile-forced* by 
 
 **Out-of-range ratings are rejected, not warned.** Unlike `coerceField`'s `rangeWarning` for custom fields, `buildLogEvent` refuses a rating outside `scale`. Forms are strict. The one cost: narrowing a definition's scale later makes old out-of-range events un-editable until the scale widens again or the rating changes. Judged acceptable — nothing is lost, the file keeps the original value, and the error names the range.
 
-### S2 — Display
+### S2 — Display — **done**
 
 | File | Change |
 | --- | --- |
-| `src/data/dashboard.ts` | `ScoreSummary`, `summarizeScore`, wire into `summarizeAll` / `DashboardSummaries` |
-| `src/components/DashboardScores.svelte` | New tab — model on `DashboardCounters.svelte` (234 lines, the smallest) |
-| `src/components/Dashboard.svelte` | `TabKey` + `tabs` entry (`:26`, `:36`) — suggest 📈 between Habits and Maintenance |
+| `src/data/dashboard.ts` | `ScoreSummary`, `summarizeScore`, `scoreDayValues`, `scoreTone`, wired into `summarizeAll` |
+| `src/components/DashboardScores.svelte` | New tab, modelled on `DashboardCounters.svelte` |
+| `src/components/Dashboard.svelte` | `TabKey` + `tabs` entry (📈, after Counters) |
 | `src/components/DashboardOverview.svelte` | `kindClass: "score"`, a Scores group, and **value-tinted cells** (§4.2) |
+| `src/components/DashboardAnalytics.svelte` | `formatEventValue` renders a rating as `8/10` — the scale matters |
 | `src/data/definitionOrder.ts` | `OrderTabKey` += `"scores"`; `ORDER_TAB_KEYS`; `emptyDefinitionOrder` |
-| `src/main.ts` | `tabOrderBaseline` `tabKinds` map (`:164`) |
-| `src/data/__tests__/dashboard.test.ts` | `summarizeScore` cases: empty, single, multi-per-day fold, missing days excluded from means, inverted ramp |
+| `src/main.ts` | `tabOrderBaseline` `tabKinds` map |
+| `src/data/__tests__/dashboard.test.ts` | 24 `summarizeScore` cases |
 
 `normalizeDefinitionOrder` already drops missing and unrecognized tab keys, so an existing `data.json` picks up the new `scores` key with no migration.
 
-Tab card contents, per score: current value (large), 7d and 30d means with a trend arrow, coverage, a `Sparkline` of `byDate` with a dashed reference line at `target`, and a `BarChart` distribution across the scale.
+**Every mean runs over folded day values, never raw events.** A day rated three times must not outweigh a day rated once — otherwise a busy Tuesday quietly dominates the week. `dayAggregate` is the user's stated rule for collapsing a day, so it is applied *before* averaging and there is exactly one answer to "what was Tuesday". Unrated days are skipped rather than counted as zero.
+
+**`trend` stays undefined below a data floor** (3 rated days in the 7-day window, 10 in the 30-day). Comparing a single rating against a month's average is noise, and showing it weakly invites reading a trend that is not there.
+
+**The Overview left border tracks staleness, not the rating.** The value is already in the status chip and in every cell; "you stopped rating this" has nowhere else to show. So score rows use the 4-state `freshness` like maintenance, rather than reverse-habit's continuous `freshnessColor`.
+
+**Sparkline gaps are labelled, not interpolated.** `Sparkline` takes a plain `number[]` with no gap support, so the tab plots only rated days and labels the axis "last N rated days" — accurate, rather than drawing an unbroken daily line over days that were never rated. A `target` reference line would need a new `Sparkline` prop; the target shows as a stat instead.
 
 ### S3 — Integration & analytics
 

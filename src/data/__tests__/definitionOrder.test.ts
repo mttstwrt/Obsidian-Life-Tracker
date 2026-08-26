@@ -16,11 +16,15 @@ describe("normalizeDefinitionOrder", () => {
 	});
 
 	test("keeps known tabs and backfills missing ones", () => {
+		// Spelled out rather than spread from emptyDefinitionOrder(): the point
+		// of this test is that every tab key comes back present, so it must not
+		// be satisfied by whatever that helper happens to return.
 		expect(normalizeDefinitionOrder({ habits: ["a", "b"] })).toEqual({
 			habits: ["a", "b"],
 			counters: [],
 			maintenance: [],
 			projects: [],
+			scores: [],
 		});
 	});
 
@@ -62,9 +66,8 @@ describe("mergeDefinitionOrder", () => {
 			projects: ["p2", "p1"],
 		};
 		const inMemory = {
+			...emptyDefinitionOrder(),
 			habits: ["a", "b"],
-			counters: [],
-			maintenance: [],
 			projects: ["p1", "p2"],
 		};
 
@@ -87,12 +90,7 @@ describe("mergeDefinitionOrder", () => {
 	});
 
 	test("falls back to memory for tabs absent from disk", () => {
-		const inMemory = {
-			habits: [],
-			counters: ["c1"],
-			maintenance: [],
-			projects: [],
-		};
+		const inMemory = { ...emptyDefinitionOrder(), counters: ["c1"] };
 		const merged = mergeDefinitionOrder({}, inMemory, {
 			tab: "habits",
 			ids: ["h1"],
@@ -111,6 +109,7 @@ describe("mergeDefinitionOrder", () => {
 			counters: [],
 			maintenance: [],
 			projects: ["p1"],
+			scores: [],
 		});
 	});
 });

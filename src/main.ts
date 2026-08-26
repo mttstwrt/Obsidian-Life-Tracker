@@ -165,6 +165,7 @@ export default class LifeTrackerPlugin extends Plugin {
 			counters: ["counter"],
 			maintenance: ["maintenance"],
 			projects: ["project"],
+			scores: ["score"],
 		};
 		const allowed = new Set(tabKinds[tab]);
 		// Every status, not just active: the Projects tab can show archived and
