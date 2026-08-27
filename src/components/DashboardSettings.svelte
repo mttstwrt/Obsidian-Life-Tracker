@@ -15,6 +15,10 @@
 			a.displayName.localeCompare(b.displayName),
 		),
 	);
+	// Dormant stays with the live ones — a project that has gone quiet is still
+	// something you are tracking. Only archived is put away.
+	const live = $derived(sorted.filter((d) => d.status !== "archived"));
+	const archived = $derived(sorted.filter((d) => d.status === "archived"));
 </script>
 
 <div class="lt-set">
@@ -35,46 +39,70 @@
 				Open plugin settings
 			</button>
 		</div>
+		{#snippet definitionRow(def: Definition)}
+			<li
+				class="lt-set__row"
+				class:lt-set__row--archived={def.status === "archived"}
+			>
+				<span class="lt-set__emoji">{def.emoji ?? "•"}</span>
+				<div class="lt-set__main">
+					<div class="lt-set__title">{def.displayName}</div>
+					<div class="lt-set__meta">
+						{def.kind} · {def.id}
+						{#if def.status !== "active"}· {def.status}{/if}
+					</div>
+				</div>
+				<button
+					type="button"
+					onclick={() => plugin.openEditDefinition(def.id)}
+				>
+					Edit
+				</button>
+				{#if def.status === "archived"}
+					<button
+						type="button"
+						onclick={() => plugin.unarchiveAndRefresh(def.id)}
+					>
+						Unarchive
+					</button>
+				{:else}
+					<button
+						type="button"
+						onclick={() => plugin.archiveAndRefresh(def.id)}
+					>
+						Archive
+					</button>
+				{/if}
+			</li>
+		{/snippet}
+
 		{#if sorted.length === 0}
 			<p class="lt-set__empty">No definitions yet.</p>
 		{:else}
-			<ul class="lt-set__list">
-				{#each sorted as def (def.id)}
-					<li class="lt-set__row">
-						<span class="lt-set__emoji">{def.emoji ?? "•"}</span>
-						<div class="lt-set__main">
-							<div class="lt-set__title">{def.displayName}</div>
-							<div class="lt-set__meta">
-								{def.kind} · {def.id}
-								{#if def.status !== "active"}· {def.status}{/if}
-							</div>
-						</div>
-						<button
-							type="button"
-							onclick={() => plugin.openEditDefinition(def.id)}
-						>
-							Edit
-						</button>
-						{#if def.status === "archived"}
-							<button
-								type="button"
-								onclick={() =>
-									plugin.unarchiveAndRefresh(def.id)}
-							>
-								Unarchive
-							</button>
-						{:else}
-							<button
-								type="button"
-								onclick={() =>
-									plugin.archiveAndRefresh(def.id)}
-							>
-								Archive
-							</button>
-						{/if}
-					</li>
-				{/each}
-			</ul>
+			{#if live.length > 0}
+				<ul class="lt-set__list">
+					{#each live as def (def.id)}
+						{@render definitionRow(def)}
+					{/each}
+				</ul>
+			{:else}
+				<p class="lt-set__empty">
+					Nothing active — everything you track is archived.
+				</p>
+			{/if}
+
+			{#if archived.length > 0}
+				<details class="lt-set__archived">
+					<summary class="lt-set__archived-summary">
+						Archived ({archived.length})
+					</summary>
+					<ul class="lt-set__list">
+						{#each archived as def (def.id)}
+							{@render definitionRow(def)}
+						{/each}
+					</ul>
+				</details>
+			{/if}
 		{/if}
 	</section>
 
@@ -132,6 +160,27 @@
 	}
 	.lt-set__emoji {
 		font-size: 1.3rem;
+	}
+	/*
+	 * Collapsed by default: archived is by definition the stuff you are not
+	 * looking at, and the count in the summary keeps it findable.
+	 */
+	.lt-set__archived {
+		margin-top: 0.75rem;
+	}
+	.lt-set__archived-summary {
+		cursor: pointer;
+		font-size: 0.8rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--text-muted);
+		padding: 0.2rem 0;
+	}
+	.lt-set__archived .lt-set__list {
+		margin-top: 0.4rem;
+	}
+	.lt-set__row--archived {
+		opacity: 0.7;
 	}
 	.lt-set__main {
 		flex: 1;
