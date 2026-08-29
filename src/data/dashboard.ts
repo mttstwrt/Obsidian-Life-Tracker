@@ -1,12 +1,15 @@
 import { parseTargetCadence } from "./definitionForm";
-import type {
-	CounterDefinition,
-	Definition,
-	Event,
-	HabitDefinition,
-	MaintenanceDefinition,
-	ProjectDefinition,
-	ReverseHabitDefinition,
+import {
+	type CounterDefinition,
+	DEFAULT_SCORE_DAY_AGGREGATE,
+	type Definition,
+	type Event,
+	type HabitDefinition,
+	type MaintenanceDefinition,
+	type ProjectDefinition,
+	type ReverseHabitDefinition,
+	type ScoreDayAggregate,
+	type ScoreDefinition,
 } from "./types";
 import { milestoneTone } from "./visualizations";
 
@@ -60,6 +63,35 @@ export interface CounterSummary {
 	progress?: number;
 }
 
+export interface ScoreSummary {
+	definition: ScoreDefinition;
+	/** Most recent rated event. */
+	latest?: { value: number; timestamp: string };
+	/** Today's folded day value, when today carries a rating. */
+	todayValue?: number;
+	/** Means over *day values*, not raw events — see `summarizeScore`. */
+	mean7?: number;
+	mean30?: number;
+	meanAll?: number;
+	/** `mean7 - mean30`, only when both windows carry enough rated days. */
+	trend?: number;
+	/** Extremes over raw ratings: the single worst and best readings. */
+	min?: number;
+	max?: number;
+	/** Rated events — those actually carrying a numeric value. */
+	count: number;
+	/** Rated days in the window ÷ window length. Scores have coverage, not streaks. */
+	coverage7: number;
+	coverage30: number;
+	daysSinceLast: number | null;
+	status: FreshnessStatus;
+	/** Folded day value per date. Feeds the Overview grid and the sparkline. */
+	byDate: Map<string, number>;
+	distribution: { value: number; count: number }[];
+	/** Latest day value as 0..1 for `toneColor`; flipped when `higherIsBetter` is false. */
+	tone?: number;
+}
+
 export interface ReverseHabitSummary {
 	definition: ReverseHabitDefinition;
 	lastEventTimestamp?: string;
@@ -75,6 +107,16 @@ const MS_PER_DAY = 86_400_000;
 const PROJECT_DEFAULT_DORMANT_DAYS = 14;
 const HABITS_GRID_DAYS = 28;
 const MILESTONE_PROXIMITY_DAYS = 3;
+
+/**
+ * A trend is `mean7 - mean30`, which is noise unless both windows hold enough
+ * rated days — comparing one rating against a month's average says nothing.
+ * Below these thresholds `trend` is left undefined rather than shown weakly.
+ */
+const SCORE_TREND_MIN_RECENT_DAYS = 3;
+const SCORE_TREND_MIN_BASELINE_DAYS = 10;
+/** Above this span the distribution reports only the values actually seen. */
+const SCORE_DISTRIBUTION_MAX_BUCKETS = 21;
 
 export function dateString(d: Date): string {
 	const y = d.getFullYear();
@@ -142,6 +184,7 @@ export interface DashboardSummaries {
 	projects: ProjectSummary[];
 	counters: CounterSummary[];
 	reverseHabits: ReverseHabitSummary[];
+	scores: ScoreSummary[];
 }
 
 export function summarizeAll(input: DashboardInput): DashboardSummaries {
@@ -150,6 +193,7 @@ export function summarizeAll(input: DashboardInput): DashboardSummaries {
 	const projects: ProjectSummary[] = [];
 	const counters: CounterSummary[] = [];
 	const reverseHabits: ReverseHabitSummary[] = [];
+	const scores: ScoreSummary[] = [];
 
 	for (const def of input.definitions) {
 		if (def.status === "archived") continue;
@@ -172,9 +216,12 @@ export function summarizeAll(input: DashboardInput): DashboardSummaries {
 			case "reverse-habit":
 				reverseHabits.push(summarizeReverseHabit(def, events, input.now));
 				break;
+			case "score":
+				scores.push(summarizeScore(def, events, input.now));
+				break;
 		}
 	}
-	return { habits, maintenance, projects, counters, reverseHabits };
+	return { habits, maintenance, projects, counters, reverseHabits, scores };
 }
 
 type CadencePeriod = "day" | "week" | "month";
@@ -405,6 +452,236 @@ export function summarizeCounter(
 		summary.progress = periodTotal / def.goal;
 	}
 	return summary;
+}
+
+interface RatedEvent {
+	timestamp: string;
+	value: number;
+}
+
+/** Rated events only — a score event with no value carries no information. */
+function ratedEvents(events: Event[]): RatedEvent[] {
+	const out: RatedEvent[] = [];
+	for (const e of events) {
+		if (typeof e.value !== "number" || !Number.isFinite(e.value)) continue;
+		if (parseTimestamp(e.timestamp) === null) continue;
+		out.push({ timestamp: e.timestamp, value: e.value });
+	}
+	return out;
+}
+
+function foldDay(values: RatedEvent[], mode: ScoreDayAggregate): number {
+	if (mode === "last") {
+		let best = values[0];
+		for (const v of values) {
+			if (v.timestamp > best.timestamp) best = v;
+		}
+		return best.value;
+	}
+	if (mode === "max" || mode === "min") {
+		let best = values[0].value;
+		for (const v of values) {
+			if (mode === "max" ? v.value > best : v.value < best) best = v.value;
+		}
+		return best;
+	}
+	let sum = 0;
+	for (const v of values) sum += v.value;
+	return sum / values.length;
+}
+
+/**
+ * One value per rated day, folded by the definition's `dayAggregate`.
+ *
+ * Everything downstream — the grid, the sparkline, every mean — reads day
+ * values rather than raw events, so a day rated three times does not outweigh
+ * a day rated once. `dayAggregate` is the user's stated rule for collapsing a
+ * day, so applying it before averaging keeps one answer to "what was Tuesday".
+ */
+export function scoreDayValues(
+	def: ScoreDefinition,
+	events: Event[],
+): Map<string, number> {
+	const byDay = new Map<string, RatedEvent[]>();
+	for (const e of ratedEvents(events)) {
+		const ts = parseTimestamp(e.timestamp);
+		if (!ts) continue;
+		const key = dateString(ts);
+		const list = byDay.get(key);
+		if (list) list.push(e);
+		else byDay.set(key, [e]);
+	}
+	const mode = def.dayAggregate ?? DEFAULT_SCORE_DAY_AGGREGATE;
+	const out = new Map<string, number>();
+	for (const [key, values] of byDay) {
+		out.set(key, foldDay(values, mode));
+	}
+	return out;
+}
+
+/** Mean of the day values in the trailing `days`-day window ending today. */
+function windowMean(
+	byDate: Map<string, number>,
+	now: Date,
+	days: number,
+): { mean?: number; ratedDays: number } {
+	const today = startOfDay(now);
+	let sum = 0;
+	let ratedDays = 0;
+	for (let i = 0; i < days; i++) {
+		const d = new Date(today);
+		d.setDate(d.getDate() - i);
+		const v = byDate.get(dateString(d));
+		if (v === undefined) continue;
+		sum += v;
+		ratedDays += 1;
+	}
+	if (ratedDays === 0) return { ratedDays: 0 };
+	return { mean: sum / ratedDays, ratedDays };
+}
+
+/**
+ * Where a rating sits on its scale, as 0..1 for `toneColor` — 0 renders red,
+ * 1 green. Inverted for a score whose low end is the good one, so stress and
+ * sleep quality both read "green is good".
+ */
+export function scoreTone(def: ScoreDefinition, value: number): number {
+	const [lo, hi] = def.scale;
+	const span = hi - lo;
+	if (span <= 0) return 0;
+	const raw = (value - lo) / span;
+	const clamped = Math.min(1, Math.max(0, raw));
+	return def.higherIsBetter === false ? 1 - clamped : clamped;
+}
+
+/**
+ * How many days may pass before a rating is considered missed. Driven by the
+ * cadence *period*, not its count: rating twice a day means a whole day
+ * without a rating is the gap that matters.
+ */
+function expectedGapDays(def: ScoreDefinition): number | null {
+	if (!def.expectedCadence) return null;
+	const cadence = parseTargetCadence(def.expectedCadence);
+	if (!cadence) return null;
+	if (cadence.period === "day") return 1;
+	if (cadence.period === "week") return 7;
+	return 30;
+}
+
+function scoreDistribution(
+	def: ScoreDefinition,
+	rated: RatedEvent[],
+): { value: number; count: number }[] {
+	// Bucket by rounding: the buttons only emit integers, but a hand-edited
+	// file may carry 7.5 and it should still land somewhere.
+	const counts = new Map<number, number>();
+	for (const e of rated) {
+		const bucket = Math.round(e.value);
+		counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+	}
+	const [lo, hi] = def.scale;
+	const span = Math.round(hi) - Math.round(lo) + 1;
+	if (
+		Number.isInteger(span) &&
+		span >= 2 &&
+		span <= SCORE_DISTRIBUTION_MAX_BUCKETS
+	) {
+		// Emit empty buckets too, so the histogram keeps a stable axis and the
+		// gaps ("never once rated it a 1") are visible.
+		const out: { value: number; count: number }[] = [];
+		for (let v = Math.round(lo); v <= Math.round(hi); v++) {
+			out.push({ value: v, count: counts.get(v) ?? 0 });
+		}
+		return out;
+	}
+	return [...counts.entries()]
+		.map(([value, count]) => ({ value, count }))
+		.sort((a, b) => a.value - b.value);
+}
+
+export function summarizeScore(
+	def: ScoreDefinition,
+	events: Event[],
+	now: Date,
+): ScoreSummary {
+	const rated = ratedEvents(events);
+	const byDate = scoreDayValues(def, events);
+
+	let latest: ScoreSummary["latest"];
+	let min: number | undefined;
+	let max: number | undefined;
+	for (const e of rated) {
+		if (!latest || e.timestamp > latest.timestamp) {
+			latest = { value: e.value, timestamp: e.timestamp };
+		}
+		if (min === undefined || e.value < min) min = e.value;
+		if (max === undefined || e.value > max) max = e.value;
+	}
+
+	const w7 = windowMean(byDate, now, 7);
+	const w30 = windowMean(byDate, now, 30);
+
+	let meanAll: number | undefined;
+	if (byDate.size > 0) {
+		let sum = 0;
+		for (const v of byDate.values()) sum += v;
+		meanAll = sum / byDate.size;
+	}
+
+	const trend =
+		w7.mean !== undefined &&
+		w30.mean !== undefined &&
+		w7.ratedDays >= SCORE_TREND_MIN_RECENT_DAYS &&
+		w30.ratedDays >= SCORE_TREND_MIN_BASELINE_DAYS
+			? w7.mean - w30.mean
+			: undefined;
+
+	const latestTs = latest ? parseTimestamp(latest.timestamp) : null;
+	const daysSinceLast = latestTs === null ? null : daysBetween(latestTs, now);
+
+	let status: FreshnessStatus;
+	if (rated.length === 0 || daysSinceLast === null) {
+		status = "never";
+	} else {
+		const gap = expectedGapDays(def);
+		if (gap === null) {
+			// No stated cadence means no expectation to fall behind.
+			status = "ok";
+		} else if (daysSinceLast <= gap) {
+			status = "ok";
+		} else if (daysSinceLast <= gap * 2) {
+			status = "approaching";
+		} else {
+			status = "overdue";
+		}
+	}
+
+	// Tone reflects the most recent *day*, which is what the row's status chip
+	// and the Overview left border are describing.
+	const latestDayValue = latestTs
+		? byDate.get(dateString(latestTs))
+		: undefined;
+
+	return {
+		definition: def,
+		latest,
+		todayValue: byDate.get(dateString(now)),
+		mean7: w7.mean,
+		mean30: w30.mean,
+		meanAll,
+		trend,
+		min,
+		max,
+		count: rated.length,
+		coverage7: w7.ratedDays / 7,
+		coverage30: w30.ratedDays / 30,
+		daysSinceLast,
+		status,
+		byDate,
+		distribution: scoreDistribution(def, rated),
+		tone:
+			latestDayValue === undefined ? undefined : scoreTone(def, latestDayValue),
+	};
 }
 
 export function summarizeReverseHabit(

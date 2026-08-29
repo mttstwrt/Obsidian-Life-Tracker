@@ -37,6 +37,7 @@ import {
 import type { PlanFormSuccess } from "./data/planForm";
 import {
 	autoEventToEventInput,
+	autoLogBlockedReason,
 	buildAutoEvent,
 	buildPlannedTimestamp,
 	matchDefinitionByLabel,
@@ -164,6 +165,7 @@ export default class LifeTrackerPlugin extends Plugin {
 			counters: ["counter"],
 			maintenance: ["maintenance"],
 			projects: ["project"],
+			scores: ["score"],
 		};
 		const allowed = new Set(tabKinds[tab]);
 		// Every status, not just active: the Projects tab can show archived and
@@ -611,6 +613,7 @@ export default class LifeTrackerPlugin extends Plugin {
 		let logged = 0;
 		let unlogged = 0;
 		const skipped: string[] = [];
+		const needsRating: string[] = [];
 
 		for (const line of newLines) {
 			const def = matchDefinitionByLabel(line.label, definitions);
@@ -618,9 +621,17 @@ export default class LifeTrackerPlugin extends Plugin {
 				skipped.push(`no match for "${line.label}"`);
 				continue;
 			}
+			const blocked = autoLogBlockedReason(def);
+			if (blocked) {
+				skipped.push(`${def.displayName}: ${blocked}`);
+				// Ticking a box is a deliberate act, so a score that can't be
+				// auto-logged says so out loud rather than only in the console.
+				if (def.kind === "score") needsRating.push(def.displayName);
+				continue;
+			}
 			const auto = buildAutoEvent(def, line, date);
 			if (!auto) {
-				skipped.push(`${def.displayName}: required fields, open log modal`);
+				skipped.push(`${def.displayName}: could not read the planned time`);
 				continue;
 			}
 			const existing = await this.data.loadEvents(def.id);
@@ -665,6 +676,11 @@ export default class LifeTrackerPlugin extends Plugin {
 				unlogged === 1
 					? "Removed 1 auto-logged event"
 					: `Removed ${unlogged} auto-logged events`,
+			);
+		}
+		if (needsRating.length > 0) {
+			new Notice(
+				`Open the log modal to rate ${needsRating.join(", ")} — a checkbox can't carry a score.`,
 			);
 		}
 		if (skipped.length > 0) {

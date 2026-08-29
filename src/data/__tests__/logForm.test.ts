@@ -6,6 +6,7 @@ import type {
 	HabitDefinition,
 	MaintenanceDefinition,
 	ReverseHabitDefinition,
+	ScoreDefinition,
 } from "../types";
 
 const RUN: HabitDefinition = {
@@ -197,5 +198,111 @@ describe("buildLogEvent — out-of-range and unknown coercion", () => {
 		if (!r.ok) throw new Error(r.error);
 		expect(r.event.fields.quality.coerced).toBe(9);
 		expect(r.event.fields.quality.rangeWarning).toBeDefined();
+	});
+});
+
+const SLEEP: ScoreDefinition = {
+	id: "sleep",
+	displayName: "Sleep quality",
+	kind: "score",
+	status: "active",
+	tags: [],
+	created: "2026-01-01",
+	schemaVersion: 1,
+	scale: [1, 10],
+};
+
+function scoreInput(overrides: Partial<Parameters<typeof buildLogEvent>[1]> = {}) {
+	return baseInput({ valueRaw: "7", fieldRaws: {}, ...overrides });
+}
+
+describe("buildLogEvent — score", () => {
+	test("score expects its own widget", () => {
+		expect(valueExpected(SLEEP)).toBe("score");
+	});
+
+	test("a rating lands in value", () => {
+		const r = buildLogEvent(SLEEP, scoreInput());
+		if (!r.ok) throw new Error(r.error);
+		expect(r.event.value).toBe(7);
+		expect(r.event.fields).toEqual({});
+	});
+
+	test("both endpoints of the scale are allowed", () => {
+		for (const raw of ["1", "10"]) {
+			const r = buildLogEvent(SLEEP, scoreInput({ valueRaw: raw }));
+			if (!r.ok) throw new Error(r.error);
+			expect(r.event.value).toBe(Number(raw));
+		}
+	});
+
+	// The whole point of a score event is the number, so unlike every other kind
+	// an empty value is a failure rather than an absent value.
+	test("an empty rating is rejected", () => {
+		const r = buildLogEvent(SLEEP, scoreInput({ valueRaw: "" }));
+		expect(r.ok).toBe(false);
+		if (r.ok) throw new Error("expected failure");
+		expect(r.error).toContain("required");
+	});
+
+	test("whitespace does not count as a rating", () => {
+		expect(buildLogEvent(SLEEP, scoreInput({ valueRaw: "   " })).ok).toBe(
+			false,
+		);
+	});
+
+	test("a non-numeric rating is rejected", () => {
+		expect(buildLogEvent(SLEEP, scoreInput({ valueRaw: "great" })).ok).toBe(
+			false,
+		);
+	});
+
+	test.each([["0"], ["11"], ["-3"]])(
+		"a rating of %s outside the scale is rejected",
+		(raw) => {
+			const r = buildLogEvent(SLEEP, scoreInput({ valueRaw: raw }));
+			expect(r.ok).toBe(false);
+			if (r.ok) throw new Error("expected failure");
+			expect(r.error).toContain("between 1 and 10");
+		},
+	);
+
+	test("the scale is read from the definition, not assumed", () => {
+		const stress: ScoreDefinition = { ...SLEEP, scale: [1, 5] };
+		expect(buildLogEvent(stress, scoreInput({ valueRaw: "5" })).ok).toBe(true);
+		const r = buildLogEvent(stress, scoreInput({ valueRaw: "7" }));
+		expect(r.ok).toBe(false);
+		if (r.ok) throw new Error("expected failure");
+		expect(r.error).toContain("between 1 and 5");
+	});
+
+	test("a zero-based scale accepts 0", () => {
+		const def: ScoreDefinition = { ...SLEEP, scale: [0, 4] };
+		const r = buildLogEvent(def, scoreInput({ valueRaw: "0" }));
+		if (!r.ok) throw new Error(r.error);
+		expect(r.event.value).toBe(0);
+	});
+
+	test("notes still work alongside a rating", () => {
+		const r = buildLogEvent(SLEEP, scoreInput({ note: "up twice" }));
+		if (!r.ok) throw new Error(r.error);
+		expect(r.event.note).toBe("up twice");
+		expect(r.event.value).toBe(7);
+	});
+
+	// Rating last night's sleep this morning is the normal case for a score, so
+	// the retroactive stamp fires often — deliberately kept, one rule for every
+	// kind.
+	test("a retroactive rating still gets the entered_at stamp", () => {
+		const r = buildLogEvent(
+			SLEEP,
+			scoreInput({
+				date: "2026-04-29",
+				now: () => new Date("2026-04-30T08:00:00Z"),
+			}),
+		);
+		if (!r.ok) throw new Error(r.error);
+		expect(r.retroactive).toBe(true);
+		expect(r.event.fields.entered_at).toBeDefined();
 	});
 });

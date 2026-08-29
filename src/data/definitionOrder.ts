@@ -11,19 +11,31 @@
  * window by rebasing onto whatever is on disk at write time; see its docs.
  */
 
-export type OrderTabKey = "habits" | "counters" | "maintenance" | "projects";
+export type OrderTabKey =
+	| "habits"
+	| "counters"
+	| "maintenance"
+	| "projects"
+	| "scores";
 
 export const ORDER_TAB_KEYS: OrderTabKey[] = [
 	"habits",
 	"counters",
 	"maintenance",
 	"projects",
+	"scores",
 ];
 
 export type DefinitionOrder = Record<OrderTabKey, string[]>;
 
 export function emptyDefinitionOrder(): DefinitionOrder {
-	return { habits: [], counters: [], maintenance: [], projects: [] };
+	return {
+		habits: [],
+		counters: [],
+		maintenance: [],
+		projects: [],
+		scores: [],
+	};
 }
 
 /**

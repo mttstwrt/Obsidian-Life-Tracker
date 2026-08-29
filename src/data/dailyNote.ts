@@ -30,6 +30,7 @@ const TAG_BY_KIND: Record<Definition["kind"], string> = {
 	maintenance: "#maint",
 	project: "#work",
 	counter: "#habit",
+	score: "#habit",
 };
 
 function sanitizeTag(raw: string): string | null {

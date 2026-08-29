@@ -11,6 +11,7 @@ import {
 	summarizeMaintenance,
 	summarizeProject,
 	summarizeReverseHabit,
+	summarizeScore,
 } from "../dashboard";
 import type {
 	CounterDefinition,
@@ -19,6 +20,7 @@ import type {
 	MaintenanceDefinition,
 	ProjectDefinition,
 	ReverseHabitDefinition,
+	ScoreDefinition,
 } from "../types";
 
 function ev(timestamp: string, value?: number): Event {
@@ -512,5 +514,243 @@ describe("summarizeAll", () => {
 		expect(result.projects.length).toBe(1);
 		expect(result.counters.length).toBe(1);
 		expect(result.reverseHabits.length).toBe(1);
+	});
+});
+
+const SCORE: ScoreDefinition = {
+	id: "sleep",
+	displayName: "Sleep quality",
+	kind: "score",
+	status: "active",
+	tags: [],
+	created: "2026-01-01",
+	schemaVersion: 1,
+	scale: [1, 10],
+};
+
+/** A rating at local noon on the given day offset back from `now`. */
+function rating(now: Date, daysAgo: number, value: number, hour = 12): Event {
+	const d = new Date(now);
+	d.setDate(d.getDate() - daysAgo);
+	d.setHours(hour, 0, 0, 0);
+	return {
+		id: `${daysAgo}-${hour}-${value}`,
+		timestamp: d.toISOString(),
+		value,
+		fields: {},
+	};
+}
+
+describe("summarizeScore", () => {
+	const NOW = new Date(2026, 4, 20, 18);
+
+	test("an unrated score reports nothing rather than zero", () => {
+		const s = summarizeScore(SCORE, [], NOW);
+		expect(s.count).toBe(0);
+		expect(s.latest).toBeUndefined();
+		expect(s.mean7).toBeUndefined();
+		expect(s.meanAll).toBeUndefined();
+		expect(s.tone).toBeUndefined();
+		expect(s.status).toBe("never");
+		expect(s.coverage7).toBe(0);
+		expect(s.byDate.size).toBe(0);
+	});
+
+	test("a single rating lands in latest, today, and the day map", () => {
+		const s = summarizeScore(SCORE, [rating(NOW, 0, 8)], NOW);
+		expect(s.count).toBe(1);
+		expect(s.latest?.value).toBe(8);
+		expect(s.todayValue).toBe(8);
+		expect(s.mean7).toBe(8);
+		expect(s.byDate.get(dateString(NOW))).toBe(8);
+		expect(s.daysSinceLast).toBe(0);
+	});
+
+	// The core rule: a day rated three times must not outweigh a day rated once,
+	// so every mean runs over folded day values rather than raw events.
+	test("means run over day values, not raw events", () => {
+		const events = [
+			rating(NOW, 1, 2, 9),
+			rating(NOW, 1, 2, 13),
+			rating(NOW, 1, 2, 20),
+			rating(NOW, 0, 8),
+		];
+		const s = summarizeScore(SCORE, events, NOW);
+		expect(s.count).toBe(4);
+		// Day values are 2 and 8, so the mean is 5 — not (2+2+2+8)/4 = 3.5.
+		expect(s.mean7).toBe(5);
+		expect(s.byDate.size).toBe(2);
+	});
+
+	describe("dayAggregate", () => {
+		const sameDay = [
+			rating(NOW, 0, 2, 9),
+			rating(NOW, 0, 6, 13),
+			rating(NOW, 0, 4, 20),
+		];
+
+		test("defaults to the mean", () => {
+			const s = summarizeScore(SCORE, sameDay, NOW);
+			expect(s.todayValue).toBe(4);
+		});
+
+		test("max takes the highest", () => {
+			const def: ScoreDefinition = { ...SCORE, dayAggregate: "max" };
+			expect(summarizeScore(def, sameDay, NOW).todayValue).toBe(6);
+		});
+
+		test("min takes the lowest", () => {
+			const def: ScoreDefinition = { ...SCORE, dayAggregate: "min" };
+			expect(summarizeScore(def, sameDay, NOW).todayValue).toBe(2);
+		});
+
+		test("last takes the latest by timestamp, not by array order", () => {
+			const def: ScoreDefinition = { ...SCORE, dayAggregate: "last" };
+			const shuffled = [sameDay[1], sameDay[2], sameDay[0]];
+			expect(summarizeScore(def, shuffled, NOW).todayValue).toBe(4);
+		});
+	});
+
+	// An unrated day is unknown, not bad. Counting it as zero would drag every
+	// average toward the bottom of the scale.
+	test("unrated days are excluded from means, not counted as zero", () => {
+		const s = summarizeScore(
+			SCORE,
+			[rating(NOW, 0, 8), rating(NOW, 6, 6)],
+			NOW,
+		);
+		expect(s.mean7).toBe(7);
+		expect(s.coverage7).toBeCloseTo(2 / 7);
+	});
+
+	test("coverage counts rated days in the window", () => {
+		const events = [0, 1, 2, 3].map((d) => rating(NOW, d, 5));
+		const s = summarizeScore(SCORE, events, NOW);
+		expect(s.coverage7).toBeCloseTo(4 / 7);
+		expect(s.coverage30).toBeCloseTo(4 / 30);
+	});
+
+	test("events outside the window do not leak into it", () => {
+		const s = summarizeScore(SCORE, [rating(NOW, 20, 3)], NOW);
+		expect(s.mean7).toBeUndefined();
+		expect(s.mean30).toBe(3);
+		expect(s.meanAll).toBe(3);
+	});
+
+	test("min and max are the raw extremes, not day values", () => {
+		const events = [rating(NOW, 0, 2, 9), rating(NOW, 0, 8, 13)];
+		const s = summarizeScore(SCORE, events, NOW);
+		expect(s.min).toBe(2);
+		expect(s.max).toBe(8);
+		// The day itself folded to the mean of the two.
+		expect(s.todayValue).toBe(5);
+	});
+
+	test("an event with no value is ignored entirely", () => {
+		const events = [
+			rating(NOW, 0, 8),
+			{ ...rating(NOW, 1, 0), value: undefined },
+		];
+		const s = summarizeScore(SCORE, events, NOW);
+		expect(s.count).toBe(1);
+		expect(s.byDate.size).toBe(1);
+	});
+
+	describe("trend", () => {
+		test("stays undefined until both windows have enough rated days", () => {
+			const thin = [0, 1, 2].map((d) => rating(NOW, d, 5));
+			expect(summarizeScore(SCORE, thin, NOW).trend).toBeUndefined();
+		});
+
+		test("compares the recent week against the month", () => {
+			// 10 older days at 4, then 3 recent days at 8.
+			const events = [
+				...Array.from({ length: 10 }, (_, i) => rating(NOW, i + 7, 4)),
+				...[0, 1, 2].map((d) => rating(NOW, d, 8)),
+			];
+			const s = summarizeScore(SCORE, events, NOW);
+			expect(s.mean7).toBe(8);
+			expect(s.trend).toBeDefined();
+			expect(s.trend as number).toBeGreaterThan(0);
+		});
+	});
+
+	describe("status", () => {
+		test("a stated cadence drives ok / approaching / overdue", () => {
+			const def: ScoreDefinition = { ...SCORE, expectedCadence: "1/day" };
+			expect(summarizeScore(def, [rating(NOW, 0, 5)], NOW).status).toBe("ok");
+			expect(summarizeScore(def, [rating(NOW, 2, 5)], NOW).status).toBe(
+				"approaching",
+			);
+			expect(summarizeScore(def, [rating(NOW, 9, 5)], NOW).status).toBe(
+				"overdue",
+			);
+		});
+
+		test("without a cadence there is no expectation to fall behind", () => {
+			expect(summarizeScore(SCORE, [rating(NOW, 40, 5)], NOW).status).toBe("ok");
+		});
+
+		test("a weekly cadence tolerates a longer gap than a daily one", () => {
+			const weekly: ScoreDefinition = { ...SCORE, expectedCadence: "1/week" };
+			expect(summarizeScore(weekly, [rating(NOW, 5, 5)], NOW).status).toBe("ok");
+		});
+	});
+
+	describe("tone", () => {
+		test("runs low to high on an ordinary score", () => {
+			expect(summarizeScore(SCORE, [rating(NOW, 0, 1)], NOW).tone).toBe(0);
+			expect(summarizeScore(SCORE, [rating(NOW, 0, 10)], NOW).tone).toBe(1);
+		});
+
+		// Low stress is the good end, so the ramp has to run the other way or the
+		// grid would paint a calm day red.
+		test("inverts when a low rating is the good one", () => {
+			const stress: ScoreDefinition = {
+				...SCORE,
+				scale: [1, 5],
+				higherIsBetter: false,
+			};
+			expect(summarizeScore(stress, [rating(NOW, 0, 1)], NOW).tone).toBe(1);
+			expect(summarizeScore(stress, [rating(NOW, 0, 5)], NOW).tone).toBe(0);
+		});
+	});
+
+	describe("distribution", () => {
+		test("covers the whole scale, including never-used ratings", () => {
+			const s = summarizeScore(SCORE, [rating(NOW, 0, 8)], NOW);
+			expect(s.distribution).toHaveLength(10);
+			expect(s.distribution[0]).toEqual({ value: 1, count: 0 });
+			expect(s.distribution[7]).toEqual({ value: 8, count: 1 });
+		});
+
+		test("buckets a fractional rating by rounding", () => {
+			const s = summarizeScore(SCORE, [rating(NOW, 0, 7.4)], NOW);
+			expect(s.distribution[6]).toEqual({ value: 7, count: 1 });
+		});
+	});
+});
+
+describe("summarizeAll — scores", () => {
+	test("scores are dispatched into their own bucket", () => {
+		const now = new Date(2026, 4, 20, 18);
+		const result = summarizeAll({
+			definitions: [SCORE, HABIT],
+			eventsByDefinitionId: new Map([[SCORE.id, [rating(now, 0, 7)]]]),
+			now,
+		});
+		expect(result.scores).toHaveLength(1);
+		expect(result.scores[0].definition.id).toBe(SCORE.id);
+		expect(result.scores[0].todayValue).toBe(7);
+	});
+
+	test("an archived score is skipped like any other kind", () => {
+		const now = new Date(2026, 4, 20, 18);
+		const result = summarizeAll({
+			definitions: [{ ...SCORE, status: "archived" } as ScoreDefinition],
+			eventsByDefinitionId: new Map([[SCORE.id, [rating(now, 0, 7)]]]),
+			now,
+		});
+		expect(result.scores).toHaveLength(0);
 	});
 });

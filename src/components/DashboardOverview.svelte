@@ -8,6 +8,7 @@
 		dateString,
 		gridDates,
 		projectFreshnessStatus,
+		scoreTone,
 	} from "../data/dashboard";
 	import { eventsByDate, toneColor } from "../data/visualizations";
 	import { TagDayModal, type TagDayEntry } from "../views/TagDayModal";
@@ -99,7 +100,7 @@
 
 	interface OverviewRow {
 		definition: Definition;
-		kindClass: "habit" | "reverse" | "maint" | "project" | "counter";
+		kindClass: "habit" | "reverse" | "maint" | "project" | "counter" | "score";
 		status: string;
 		statusTone: StatusTone;
 		statusLabel: string;
@@ -107,6 +108,19 @@
 		freshness?: FreshnessStatus;
 		/** Reverse habits use a continuous tone color instead of the 4-state freshness. */
 		freshnessColor?: string;
+		/**
+		 * Score rows paint each cell by that day's *rating* rather than by how
+		 * many events landed on it — the one place the grid means something
+		 * other than a count. Absent for every other kind.
+		 */
+		dayValues?: Map<string, number>;
+		/** Maps a day value to 0..1 for `toneColor`. Present iff `dayValues` is. */
+		dayTone?: (value: number) => number;
+	}
+
+	/** At most one decimal, and no trailing ".0" — day values can be means. */
+	function formatScore(v: number): string {
+		return Number.isInteger(v) ? String(v) : v.toFixed(1);
 	}
 
 	interface OverviewGroup {
@@ -247,6 +261,43 @@
 				rows: counters,
 				tab: "counters",
 				group: "counters",
+			});
+
+		const scores: OverviewRow[] = applyOrder(
+			summaries.scores,
+			order.scores ?? [],
+			(s) => s.definition.id,
+		).map((s) => ({
+			definition: s.definition,
+			kindClass: "score" as const,
+			status:
+				s.todayValue !== undefined
+					? formatScore(s.todayValue)
+					: s.latest
+						? formatScore(s.latest.value)
+						: "—",
+			statusTone: undefined,
+			statusLabel:
+				s.count === 0
+					? "never rated"
+					: s.mean7 !== undefined
+						? `7d avg ${formatScore(s.mean7)}`
+						: s.daysSinceLast !== null
+							? `${s.daysSinceLast}d ago`
+							: "—",
+			// The left border tracks staleness, not the rating: the value is
+			// already in the status chip and every cell, while "you stopped
+			// rating this" has nowhere else to show.
+			freshness: s.status,
+			dayValues: s.byDate,
+			dayTone: (v: number) => scoreTone(s.definition, v),
+		}));
+		if (scores.length)
+			out.push({
+				label: "Scores",
+				rows: scores,
+				tab: "scores",
+				group: "scores",
 			});
 
 		return out;
@@ -432,6 +483,8 @@
 									</td>
 									{#each dates as d, i (d)}
 										{@const c = cellCount(counts, d)}
+										{@const rating = row.dayValues?.get(d)}
+										{@const rated = rating !== undefined}
 										<td
 											class="lt-ov__cell"
 											class:lt-ov__day-col--old={i < dates.length - 7}
@@ -440,17 +493,37 @@
 											<button
 												type="button"
 												class="lt-ov__cell-button lt-ov__cell-button--{row.kindClass}"
-												class:has={c > 0}
-												title={c > 0 ? `${c} on ${d}` : `Log on ${d}`}
-												aria-label={c > 0
-													? `${c} events on ${d}`
-													: `Log ${row.definition.displayName} on ${d}`}
+												class:has={row.dayValues ? rated : c > 0}
+												style:background-color={rating !== undefined &&
+												row.dayTone
+													? toneColor(row.dayTone(rating))
+													: undefined}
+												title={row.dayValues
+													? rating !== undefined
+														? `${formatScore(rating)} on ${d}`
+														: `Rate on ${d}`
+													: c > 0
+														? `${c} on ${d}`
+														: `Log on ${d}`}
+												aria-label={row.dayValues
+													? rating !== undefined
+														? `${row.definition.displayName} rated ${formatScore(rating)} on ${d}`
+														: `Rate ${row.definition.displayName} on ${d}`
+													: c > 0
+														? `${c} events on ${d}`
+														: `Log ${row.definition.displayName} on ${d}`}
 												onclick={() =>
 													plugin.openLogModal(row.definition.id, {
 														initialDate: d,
 													})}
 											>
-												{#if c > 1}
+												{#if row.dayValues}
+													{#if rating !== undefined}
+														<span class="lt-ov__cell-score"
+															>{formatScore(rating)}</span
+														>
+													{/if}
+												{:else if c > 1}
 													<span class="lt-ov__cell-count">{c}</span>
 												{:else if c === 1}
 													<span class="lt-ov__cell-dot"
@@ -710,6 +783,18 @@
 	.lt-ov__cell-button--counter.has {
 		background: var(--color-cyan, #00bfbc);
 		color: var(--text-on-accent);
+	}
+	/*
+	 * Scores take their fill from an inline toneColor() rather than a fixed
+	 * per-kind color, so `.has` only supplies the text color that sits on it.
+	 */
+	.lt-ov__cell-button--score.has {
+		color: var(--text-on-accent);
+	}
+	.lt-ov__cell-score {
+		font-size: 0.65rem;
+		font-variant-numeric: tabular-nums;
+		font-weight: 600;
 	}
 	.lt-ov__cell-dot {
 		font-size: 0.5rem;

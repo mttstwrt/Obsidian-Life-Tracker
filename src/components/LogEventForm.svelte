@@ -210,6 +210,29 @@
 		),
 	);
 	const expected = $derived(valueExpected(definition));
+
+	/**
+	 * Discrete buttons for a rating, rather than a slider. A range input reports
+	 * its midpoint before it has been touched, so an untouched slider would
+	 * submit a rating the user never chose — and the whole point of a score is
+	 * that the number is deliberate. Buttons have no default and are one tap on
+	 * mobile. Scales too wide to show as buttons fall back to a number input.
+	 */
+	const MAX_RATING_BUTTONS = 11;
+	const ratingChoices = $derived.by((): number[] => {
+		if (definition.kind !== "score") return [];
+		const [lo, hi] = definition.scale;
+		const span = hi - lo + 1;
+		if (!Number.isInteger(lo) || !Number.isInteger(hi)) return [];
+		if (span < 2 || span > MAX_RATING_BUTTONS) return [];
+		return Array.from({ length: span }, (_, i) => lo + i);
+	});
+	const scoreScale = $derived(
+		definition.kind === "score" ? definition.scale : null,
+	);
+	const scoreLabels = $derived(
+		definition.kind === "score" ? definition.scaleLabels : undefined,
+	);
 	const isReverseHabit = $derived(definition.kind === "reverse-habit");
 	const noteRequired = $derived(
 		definition.kind === "reverse-habit" && definition.noteRequired === true,
@@ -363,7 +386,44 @@
 					</label>
 				</fieldset>
 
-				{#if expected === "number"}
+				{#if expected === "score"}
+					<fieldset class="lt-form__label lt-score">
+						<legend>Rating <em class="lt-form__req">*</em></legend>
+						{#if ratingChoices.length > 0}
+							<!-- Plain toggle buttons rather than role="radio": a radiogroup
+							     promises roving tabindex and arrow-key navigation, and
+							     aria-pressed describes what this actually does. -->
+							<div class="lt-score__choices">
+								{#each ratingChoices as choice (choice)}
+									<button
+										type="button"
+										aria-pressed={valueRaw === String(choice)}
+										class="lt-score__choice"
+										class:lt-score__choice--on={valueRaw === String(choice)}
+										onclick={() => (valueRaw = String(choice))}
+									>
+										{choice}
+									</button>
+								{/each}
+							</div>
+							{#if scoreLabels}
+								<div class="lt-score__ends">
+									<span>{scoreLabels[0]}</span>
+									<span>{scoreLabels[1]}</span>
+								</div>
+							{/if}
+						{:else if scoreScale}
+							<input
+								type="number"
+								inputmode="numeric"
+								min={scoreScale[0]}
+								max={scoreScale[1]}
+								placeholder={`${scoreScale[0]}–${scoreScale[1]}`}
+								bind:value={valueRaw}
+							/>
+						{/if}
+					</fieldset>
+				{:else if expected === "number"}
 					<label class="lt-form__label">
 						<span>{valueLabel || "Value"}</span>
 						<input
@@ -634,6 +694,43 @@
 	.lt-form__req {
 		color: var(--text-error);
 		font-style: normal;
+	}
+	.lt-score {
+		border: none;
+		padding: 0;
+		margin: 0;
+	}
+	.lt-score legend {
+		color: var(--text-muted);
+		font-size: 0.85rem;
+		padding: 0;
+		margin-bottom: 0.25rem;
+	}
+	.lt-score__choices {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+	}
+	.lt-score__choice {
+		flex: 1 1 2.25rem;
+		min-width: 2.25rem;
+		min-height: 2.5rem;
+		padding: 0;
+		font-size: 1rem;
+		font-variant-numeric: tabular-nums;
+		cursor: pointer;
+	}
+	.lt-score__choice--on {
+		background: var(--interactive-accent);
+		color: var(--text-on-accent);
+		font-weight: 600;
+	}
+	.lt-score__ends {
+		display: flex;
+		justify-content: space-between;
+		margin-top: 0.25rem;
+		color: var(--text-muted);
+		font-size: 0.75rem;
 	}
 	.lt-form__error {
 		color: var(--text-error);

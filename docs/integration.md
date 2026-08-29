@@ -74,7 +74,7 @@ All definitions share a common base:
 | `id` | string | Slug; matches file basename. |
 | `displayName` | string | Shown in UI. |
 | `emoji` | string? | Optional. |
-| `kind` | `"habit" \| "maintenance" \| "reverse-habit" \| "project" \| "counter"` | Determines kind-specific fields below. |
+| `kind` | `"habit" \| "maintenance" \| "reverse-habit" \| "project" \| "counter" \| "score"` | Determines kind-specific fields below. |
 | `status` | `"active" \| "dormant" \| "archived"` | Filter out `archived` in most views. |
 | `tags` | string[] | Plain tag names without `#`. |
 | `created` | ISO timestamp | When the definition was created. |
@@ -89,6 +89,19 @@ Kind-specific fields:
 - **reverse-habit**: `noteRequired?: boolean`, `milestones?: number[]`.
 - **project**: `dormantAfterDays?: number`.
 - **counter**: `unit?: string`, `goal?: number`, `resetCadence?: "yearly" \| "monthly" \| "never"`.
+- **score**: `scale: [number, number]` (inclusive, low first), `scaleLabels?: [string, string]`, `higherIsBetter?: boolean` (default `true`), `dayAggregate?: "mean" \| "last" \| "max" \| "min"` (default `"mean"`), `target?: number`, `expectedCadence?: string`.
+
+#### Scores
+
+A score records *how well something went* rather than *whether it happened* — sleep quality, energy, how work was. **The rating lives in the event's `value` segment**, not in a custom field, so score events use exactly the same line format as every other kind and need no special parsing.
+
+Three things a consumer must not get wrong:
+
+- **A missing day is unknown, not zero.** Scores are commonly rated once a day and skipped freely. Averaging an unrated day as `0` drags every result toward the bottom of the scale.
+- **`higherIsBetter: false` inverts the meaning.** For stress or pain, a low rating is the good one. Any color, ranking, or "is this improving" judgement has to read this flag.
+- **`dayAggregate` collapses a multi-rated day.** When a definition is rated several times in one day, fold that day with its stated rule *before* averaging across days — otherwise a heavily-rated day silently outweighs a lightly-rated one.
+
+A score event with no `value` carries no information and should be skipped rather than treated as a zero. Ratings are normally whole numbers; a hand-edited file may contain a fractional one, so bucket by rounding rather than assuming integers.
 
 ### Custom fields (`fieldSchema`)
 
@@ -404,6 +417,7 @@ For daily-note plan lines, prefer using the same line shapes Life Tracker emits 
 ## Stability and versioning
 
 - Frontmatter carries `schemaVersion: 1`. Check it; surface a warning if you see a higher number.
+- **New `kind` values can appear without a `schemaVersion` bump.** `score` was added this way: existing definitions did not change shape, so the version stayed at `1`. A consumer that hard-codes the kind list will meet unknown kinds eventually — skip them with a warning and leave the file untouched, exactly as Life Tracker itself does. (Life Tracker's own parser refuses an unrecognized kind outright, so a vault containing scores simply shows nothing for them on an older plugin build; nothing is modified or lost.)
 - The 4-segment event line is the most stable part of the contract. Field ordering and the wikilink format may extend (new optional segments), but the existing segments will not be reordered or removed within `schemaVersion: 1`.
 - Settings keys (`rootFolder`, `planHeading`, `recordUnplannedEvents`, `linkActivitiesToDefinitions`) are stable but may grow. Treat unknown keys as opaque.
 
@@ -431,8 +445,9 @@ Tools (v1): `list_definitions`, `query_events`, `get_summaries`, `log_event`, `e
 
 Guidance:
 
-- **Reads**: either surface works. `get_summaries` is the reason to prefer the API — streaks, freshness, and period progress are computed, not stored.
+- **Reads**: either surface works. `get_summaries` is the reason to prefer the API — streaks, freshness, period progress, and score means/trends are computed, not stored.
 - **Writes**: use the API. `log_event` runs the same path as the UI (dedup, coercion, daily-note mirror); hand-writing event lines risks silent divergence.
+- **Scores need an explicit rating.** `log_event` treats an absent `value` as `1`, which for a score is not "unspecified" but the worst possible rating — so it rejects a score event without a number inside the definition's scale. Ask the user for the rating; never guess one. `edit_event` range-checks a patched rating the same way.
 - **Versioning**: check `api.version` major. New tools/fields are minor bumps; breaking changes bump the major.
 
 ## Open questions for the calendar plugin

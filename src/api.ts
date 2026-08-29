@@ -5,7 +5,11 @@ import type {
 	Event,
 	FieldValue,
 } from "./data/types";
-import { CURRENT_SCHEMA_VERSION, FIELD_KEY_RE } from "./data/types";
+import {
+	CURRENT_SCHEMA_VERSION,
+	DEFAULT_SCORE_SCALE,
+	FIELD_KEY_RE,
+} from "./data/types";
 import type LifeTrackerPlugin from "./main";
 
 /**
@@ -47,13 +51,14 @@ const KINDS: DefinitionKind[] = [
 	"reverse-habit",
 	"project",
 	"counter",
+	"score",
 ];
 
 const DESCRIPTORS: ToolDescriptor[] = [
 	{
 		name: "list_definitions",
 		description:
-			"List everything the user tracks in Life Tracker: habits, maintenance items, reverse habits, projects, and counters, with their cadence/interval, tags, and custom field schema.",
+			"List everything the user tracks in Life Tracker: habits, maintenance items, reverse habits, projects, counters, and scores, with their cadence/interval, tags, custom field schema, and (for scores) the rating scale and its direction.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -87,13 +92,13 @@ const DESCRIPTORS: ToolDescriptor[] = [
 	{
 		name: "get_summaries",
 		description:
-			"Computed status for everything tracked: habit period progress and streaks, maintenance freshness (ok/approaching/overdue), reverse-habit day counts, project activity/dormancy, counter totals and goals. The right first call for any 'how am I doing' question.",
+			"Computed status for everything tracked: habit period progress and streaks, maintenance freshness (ok/approaching/overdue), reverse-habit day counts, project activity/dormancy, counter totals and goals, and score averages with their recent trend. The right first call for any 'how am I doing' question.",
 		inputSchema: { type: "object", properties: {} },
 	},
 	{
 		name: "log_event",
 		description:
-			"Log an event for a definition. Mirrors into the user's daily note like a manual log. Custom field values go in `fields` (they are coerced against the definition's field schema).",
+			"Log an event for a definition. Mirrors into the user's daily note like a manual log. Custom field values go in `fields` (they are coerced against the definition's field schema). For a score definition, `value` is the rating and is REQUIRED — it must sit inside the definition's scale, and there is no sensible default. Ask the user for the rating rather than guessing one.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -106,7 +111,7 @@ const DESCRIPTORS: ToolDescriptor[] = [
 				value: {
 					type: "number",
 					description:
-						"Numeric value (duration in the definition's unit, count, etc.). Defaults to 1.",
+						"Numeric value (duration in the definition's unit, count, etc.). Defaults to 1. Required for scores, where it is the rating and must fall inside the definition's scale.",
 				},
 				note: { type: "string", description: "Optional note." },
 				fields: {
@@ -166,7 +171,7 @@ const DESCRIPTORS: ToolDescriptor[] = [
 	{
 		name: "create_definition",
 		description:
-			"Create a new thing to track. Kinds: habit (needs target_cadence like '4/week' or 'daily'), maintenance (needs interval_days), reverse-habit, project, counter. Ask the user before inventing definitions they didn't request.",
+			"Create a new thing to track. Kinds: habit (needs target_cadence like '4/week' or 'daily'), maintenance (needs interval_days), reverse-habit, project, counter, score (a 1-10 style rating such as sleep quality or energy). Use score only when the rating IS the event; a rating that qualifies something already tracked belongs in that definition's field schema instead. Ask the user before inventing definitions they didn't request.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -192,6 +197,24 @@ const DESCRIPTORS: ToolDescriptor[] = [
 				},
 				unit: { type: "string", description: "Habit/counter unit label." },
 				goal: { type: "number", description: "Counter goal." },
+				scale_min: {
+					type: "number",
+					description: "Score: low end of the rating scale. Default 1.",
+				},
+				scale_max: {
+					type: "number",
+					description: "Score: high end of the rating scale. Default 10.",
+				},
+				higher_is_better: {
+					type: "boolean",
+					description:
+						"Score: set false when a low rating is the good one (stress, pain). Default true.",
+				},
+				target: {
+					type: "number",
+					description:
+						"Score: optional level to stay above. Omit unless the user asked for one.",
+				},
 			},
 			required: ["id", "name", "kind"],
 		},
@@ -218,6 +241,36 @@ function ok(value: unknown): string {
 
 function err(message: string): string {
 	return JSON.stringify({ error: message });
+}
+
+/**
+ * Guard the one value this API could otherwise corrupt in silence.
+ *
+ * `log_event` treats an absent value as 1, which for every other kind means
+ * "it happened once" — but on a score 1 is not "unspecified", it is the worst
+ * possible rating. So a score demands an explicit, in-range number, matching
+ * what `buildLogEvent` requires of the log modal.
+ */
+function checkScoreValue(def: Definition, value: unknown): string | null {
+	if (def.kind !== "score") return null;
+	const [lo, hi] = def.scale;
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		return `"${def.id}" is a score: value is required and must be a number between ${lo} and ${hi}`;
+	}
+	if (value < lo || value > hi) {
+		return `rating ${value} is outside the scale of "${def.id}" (${lo}-${hi})`;
+	}
+	return null;
+}
+
+/**
+ * Round a derived statistic for model consumption. A mean of
+ * 7.428571428571429 invites a consumer to quote every digit as if it were
+ * meaningful; two decimals is well past the precision of a 1-10 rating.
+ */
+function round2(n: number | undefined): number | null {
+	if (n === undefined || !Number.isFinite(n)) return null;
+	return Math.round(n * 100) / 100;
 }
 
 /** Trim an event for model consumption: raw field strings, no coercion detail. */
@@ -256,6 +309,18 @@ export function createApi(plugin: LifeTrackerPlugin): LifeTrackerApi {
 						? { interval_days: d.intervalDays }
 						: {}),
 					...(d.kind === "counter" ? { unit: d.unit, goal: d.goal } : {}),
+					...(d.kind === "score"
+						? {
+								scale: d.scale,
+								higher_is_better: d.higherIsBetter !== false,
+								day_aggregate: d.dayAggregate ?? "mean",
+								...(d.scaleLabels ? { scale_labels: d.scaleLabels } : {}),
+								...(d.target !== undefined ? { target: d.target } : {}),
+								...(d.expectedCadence
+									? { expected_cadence: d.expectedCadence }
+									: {}),
+						  }
+						: {}),
 					fields: (d.fieldSchema ?? [])
 						.filter((f) => !f.retired)
 						.map((f) => ({
@@ -342,6 +407,25 @@ export function createApi(plugin: LifeTrackerPlugin): LifeTrackerApi {
 					period: c.periodLabel,
 					goal: c.goal ?? null,
 				})),
+				scores: s.scores.map((sc) => ({
+					id: sc.definition.id,
+					name: sc.definition.displayName,
+					scale: sc.definition.scale,
+					higher_is_better: sc.definition.higherIsBetter !== false,
+					// Nulls rather than omissions: a consumer must be able to tell
+					// "not rated recently" from "this key doesn't exist".
+					today: sc.todayValue ?? null,
+					latest: sc.latest?.value ?? null,
+					last_rated: sc.latest?.timestamp ?? null,
+					days_since_rated: sc.daysSinceLast,
+					mean_7d: round2(sc.mean7),
+					mean_30d: round2(sc.mean30),
+					trend_7d_vs_30d: round2(sc.trend),
+					rated_days_last_7: Math.round(sc.coverage7 * 7),
+					rated_days_last_30: Math.round(sc.coverage30 * 30),
+					status: sc.status,
+					target: sc.definition.target ?? null,
+				})),
 			});
 		},
 
@@ -352,6 +436,10 @@ export function createApi(plugin: LifeTrackerPlugin): LifeTrackerApi {
 			if (tsRaw && Number.isNaN(new Date(tsRaw).getTime())) {
 				return err(`invalid timestamp: "${tsRaw}"`);
 			}
+			const def = await plugin.data.getDefinition(definition);
+			if (!def) return err(`unknown definition "${definition}"`);
+			const scoreError = checkScoreValue(def, args.value);
+			if (scoreError) return err(scoreError);
 			const event: Event = {
 				id: "",
 				timestamp: tsRaw || new Date().toISOString(),
@@ -374,7 +462,12 @@ export function createApi(plugin: LifeTrackerPlugin): LifeTrackerApi {
 				}
 				patch.timestamp = str(args.timestamp);
 			}
-			if (typeof args.value === "number") patch.value = args.value;
+			if (typeof args.value === "number") {
+				const def = await plugin.data.getDefinition(definition);
+				const scoreError = def ? checkScoreValue(def, args.value) : null;
+				if (scoreError) return err(scoreError);
+				patch.value = args.value;
+			}
 			if (typeof args.note === "string") patch.note = args.note || undefined;
 			if (args.fields !== undefined) patch.fields = toFieldValues(args.fields);
 			const updated = await plugin.data.editEvent(definition, eventId, patch);
@@ -469,6 +562,28 @@ export function createApi(plugin: LifeTrackerPlugin): LifeTrackerApi {
 						goal: typeof args.goal === "number" ? args.goal : undefined,
 					};
 					break;
+				case "score": {
+					const lo = Number(args.scale_min ?? DEFAULT_SCORE_SCALE[0]);
+					const hi = Number(args.scale_max ?? DEFAULT_SCORE_SCALE[1]);
+					if (!Number.isInteger(lo) || !Number.isInteger(hi) || lo >= hi) {
+						return err(
+							"score scale_min/scale_max must be whole numbers with scale_min < scale_max",
+						);
+					}
+					const target =
+						typeof args.target === "number" ? args.target : undefined;
+					if (target !== undefined && (target < lo || target > hi)) {
+						return err(`score target must fall inside the scale (${lo}-${hi})`);
+					}
+					def = {
+						...base,
+						kind,
+						scale: [lo, hi],
+						higherIsBetter: args.higher_is_better === false ? false : undefined,
+						target,
+					};
+					break;
+				}
 			}
 
 			await plugin.data.createDefinition(def);

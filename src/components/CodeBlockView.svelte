@@ -3,7 +3,8 @@
 	import { parseYaml } from "obsidian";
 	import type LifeTrackerPlugin from "../main";
 	import type { Definition, Event as TrackerEvent } from "../data/types";
-	import { dateRange, eventsByDate } from "../data/visualizations";
+	import { dateRange, eventsByDate, toneColor } from "../data/visualizations";
+	import { dateString, scoreTone, summarizeScore } from "../data/dashboard";
 	import CalendarHeatmap from "./charts/CalendarHeatmap.svelte";
 	import Sparkline from "./charts/Sparkline.svelte";
 	import StreakBar from "./charts/StreakBar.svelte";
@@ -17,7 +18,7 @@
 		source: string;
 	} = $props();
 
-	const VIEWS = ["heatmap", "sparkline", "streak", "events"] as const;
+	const VIEWS = ["heatmap", "sparkline", "streak", "events", "score"] as const;
 	type ViewKind = (typeof VIEWS)[number];
 
 	interface ViewSpec {
@@ -76,6 +77,7 @@
 	const parsed = $derived(parseSpec(source));
 
 	let events: TrackerEvent[] = $state([]);
+	let selectedDefs: Definition[] = $state([]);
 	let resolvedNames: string[] = $state([]);
 	let loadError = $state("");
 	let loading = $state(true);
@@ -115,7 +117,8 @@
 			}
 			all.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 			events = all;
-			resolvedNames = [...selected.values()].map((d) => d.displayName);
+			selectedDefs = [...selected.values()];
+			resolvedNames = selectedDefs.map((d) => d.displayName);
 			now = new Date();
 			loadError = "";
 		} catch (e) {
@@ -134,6 +137,52 @@
 			(d) => counts.get(d) ?? 0,
 		);
 	});
+
+	/**
+	 * `view: score` needs exactly one score definition: merging ratings across
+	 * definitions would average values from different scales, which means
+	 * nothing. Returns an error string instead of a summary when that fails.
+	 */
+	const scoreView = $derived.by(() => {
+		if (parsed.spec?.view !== "score") return null;
+		if (selectedDefs.length !== 1) {
+			return {
+				error: `\`view: score\` needs exactly one definition, got ${selectedDefs.length}.`,
+			};
+		}
+		const def = selectedDefs[0];
+		if (def.kind !== "score") {
+			return {
+				error: `"${def.id}" is a ${def.kind}, not a score.`,
+			};
+		}
+		const summary = summarizeScore(def, events, now);
+		const days = parsed.spec.days ?? 30;
+		const series: number[] = [];
+		const today = new Date(now);
+		today.setHours(0, 0, 0, 0);
+		for (let i = days - 1; i >= 0; i--) {
+			const d = new Date(today);
+			d.setDate(d.getDate() - i);
+			const v = summary.byDate.get(dateString(d));
+			if (v !== undefined) series.push(v);
+		}
+		const current = summary.todayValue ?? summary.latest?.value;
+		return {
+			def,
+			summary,
+			series,
+			days,
+			current,
+			color:
+				current === undefined ? undefined : toneColor(scoreTone(def, current)),
+		};
+	});
+
+	function fmt(v: number | undefined): string {
+		if (v === undefined) return "—";
+		return Number.isInteger(v) ? String(v) : v.toFixed(1);
+	}
 
 	onMount(() => {
 		void load();
@@ -164,6 +213,42 @@
 			<Sparkline values={sparkValues} width={240} height={40} />
 		{:else if parsed.spec?.view === "events"}
 			<EventTimeline {events} {now} />
+		{:else if parsed.spec?.view === "score"}
+			{#if scoreView && "error" in scoreView}
+				<div class="lt-block__error">Life Tracker view: {scoreView.error}</div>
+			{:else if scoreView}
+				<div class="lt-block__score">
+					<div class="lt-block__score-value">
+						<span class="lt-block__score-current" style:color={scoreView.color}
+							>{fmt(scoreView.current)}</span
+						>
+						<span class="lt-block__score-scale"
+							>/ {scoreView.def.scale[1]}</span
+						>
+					</div>
+					<div class="lt-block__score-side">
+						{#if scoreView.series.length > 1}
+							<Sparkline
+								values={scoreView.series}
+								width={180}
+								height={28}
+								title="recent ratings"
+							/>
+						{/if}
+						<div class="lt-block__score-stats">
+							{#if scoreView.summary.mean7 !== undefined}
+								<span>7d {fmt(scoreView.summary.mean7)}</span>
+							{/if}
+							{#if scoreView.summary.mean30 !== undefined}
+								<span>30d {fmt(scoreView.summary.mean30)}</span>
+							{/if}
+							<span>
+								{scoreView.series.length} rated in {scoreView.days}d
+							</span>
+						</div>
+					</div>
+				</div>
+			{/if}
 		{/if}
 	{/if}
 </div>
@@ -181,6 +266,38 @@
 	.lt-block__loading {
 		color: var(--text-faint);
 		font-size: 0.85rem;
+	}
+	.lt-block__score {
+		display: flex;
+		align-items: center;
+		gap: 0.9rem;
+		flex-wrap: wrap;
+	}
+	.lt-block__score-value {
+		display: flex;
+		align-items: baseline;
+		gap: 0.2rem;
+	}
+	.lt-block__score-current {
+		font-size: 1.8rem;
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
+	}
+	.lt-block__score-scale {
+		font-size: 0.85rem;
+		color: var(--text-muted);
+	}
+	.lt-block__score-side {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+	}
+	.lt-block__score-stats {
+		display: flex;
+		gap: 0.6rem;
+		font-size: 0.7rem;
+		color: var(--text-faint);
+		font-variant-numeric: tabular-nums;
 	}
 	.lt-block__error {
 		border-left: 3px solid var(--text-error);

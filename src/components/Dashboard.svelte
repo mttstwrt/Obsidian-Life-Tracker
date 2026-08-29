@@ -11,6 +11,7 @@
 	import DashboardMaintenance from "./DashboardMaintenance.svelte";
 	import DashboardProjects from "./DashboardProjects.svelte";
 	import DashboardCounters from "./DashboardCounters.svelte";
+	import DashboardScores from "./DashboardScores.svelte";
 	import DashboardTags from "./DashboardTags.svelte";
 	import DashboardAnalytics from "./DashboardAnalytics.svelte";
 	import DashboardSettings from "./DashboardSettings.svelte";
@@ -29,6 +30,7 @@
 		| "maintenance"
 		| "projects"
 		| "counters"
+		| "scores"
 		| "tags"
 		| "analytics"
 		| "settings";
@@ -39,6 +41,7 @@
 		{ key: "maintenance", label: "Maintenance", emoji: "🛠" },
 		{ key: "projects", label: "Projects", emoji: "📁" },
 		{ key: "counters", label: "Counters", emoji: "🔢" },
+		{ key: "scores", label: "Scores", emoji: "📈" },
 		{ key: "tags", label: "Tags", emoji: "🏷" },
 		{ key: "analytics", label: "Analytics", emoji: "📊" },
 		{ key: "settings", label: "Settings", emoji: "⚙" },
@@ -177,6 +180,8 @@
 					{eventsByDefinition}
 					{now}
 				/>
+			{:else if activeTab === "scores"}
+				<DashboardScores {summaries} {plugin} {now} />
 			{:else if activeTab === "tags"}
 				<DashboardTags {definitions} {eventsByDefinition} {now} {plugin} />
 			{:else if activeTab === "analytics"}
